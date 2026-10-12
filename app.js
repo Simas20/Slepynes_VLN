@@ -168,7 +168,7 @@
     const el = h('div', { class: 'toast ' + (kind || '') }, text);
     $('#toasts').append(el);
     setTimeout(() => el.remove(), kind === 'err' ? 5000 : 4000);
-    while ($('#toasts').children.length > 3) $('#toasts').firstChild.remove();
+    while ($('#toasts').children.length > 2) $('#toasts').firstChild.remove();
   }
   function buzz(pattern) { try { navigator.vibrate && navigator.vibrate(pattern); } catch {} }
   let audio = null;
@@ -354,10 +354,10 @@
         h('h3', {}, 'Settings'),
         h('label', { class: 'setting' }, 'Hiding time',
           h('select', { disabled: !host, onchange: (e) => send({ type: 'settings', hideMinutes: +e.target.value }) },
-            [10, 15, 20, 25, 30, 35, 40, 45].map((m) => h('option', { value: m, selected: s.hideMinutes === m }, m + ' min')))),
-        h('label', { class: 'setting' }, 'Hiding zone radius',
+            [10 / 60, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 60, 75, 90].map((m) => h('option', { value: m, selected: Math.abs(s.hideMinutes - m) < 0.001 }, m < 1 ? '10 seconds (testing)' : m + ' min')))),
+        h('label', { class: 'setting' }, 'Hiding zone radius (around the hider)',
           h('select', { disabled: !host, onchange: (e) => send({ type: 'settings', zoneRadius: +e.target.value }) },
-            [100, 150, 200, 250, 300, 400].map((m) => h('option', { value: m, selected: s.zoneRadius === m }, m + ' m')))),
+            [100, 150, 200, 250, 300, 400, 500, 600, 750, 1000].map((m) => h('option', { value: m, selected: s.zoneRadius === m }, m < 1000 ? m + ' m' : '1 km')))),
         h('label', { class: 'check' },
           h('input', { type: 'checkbox', checked: s.includeNaujamiestis, disabled: !host, onchange: (e) => send({ type: 'settings', includeNaujamiestis: e.target.checked }) }),
           'Include Naujamiestis')),
@@ -393,15 +393,30 @@
     if (block && !q && S.phase === 'seeking') out.push(h('div', { class: 'hint' }, block));
     for (const [cat, def] of Object.entries(C.QUESTIONS)) {
       const left = def.items.filter((i) => i.custom || !S.used.includes(i.id)).length;
-      out.push(h('details', { class: 'cat', style: `--cat:${def.color}`, open: openCats.has(cat), ontoggle: (e) => { if (e.target.open) openCats.add(cat); else openCats.delete(cat); } },
-        h('summary', {}, h('b', {}, def.label), h('span', { class: 'muted' }, def.short), h('span', { class: 'count' }, `${left} left`)),
-        h('div', { class: 'reward' }, `${def.blurb} Hider draws ${def.reward.draw}, keeps ${def.reward.keep}. ${def.minutes} min to answer.`),
-        h('div', { class: 'qlist' }, def.items.map((it) => h('button', {
-          class: 'q', disabled: (!it.custom && S.used.includes(it.id)) || !!block,
+      const open = openCats.has(cat);
+      out.push(h('div', { class: 'cat' + (open ? ' open' : ''), style: `--cat:${def.color}`, 'data-cat': cat },
+        h('button', { class: 'cat-head', 'aria-expanded': String(open), onclick: () => toggleCat(cat) },
+          h('b', {}, def.label), h('span', { class: 'muted' }, def.short), h('span', { class: 'count' }, `${left} left`),
+          h('span', { class: 'chev', 'aria-hidden': 'true' }, open ? '▴' : '▾')),
+        open ? h('div', { class: 'reward' }, `${def.blurb} Hider draws ${def.reward.draw}, keeps ${def.reward.keep}. ${def.minutes} min to answer.`) : null,
+        open ? h('div', { class: 'qlist' }, def.items.map((it) => h('button', {
+          class: 'q' + (!it.custom && S.used.includes(it.id) ? ' used' : ''), disabled: (!it.custom && S.used.includes(it.id)) || !!block,
           onclick: () => askFlow(cat, it),
-        }, it.custom ? 'Are you within ... of us? (choose a distance)' : it.text)))));
+        }, it.custom ? 'Are you within ... of us? (choose a distance)' : it.text))) : null));
     }
     return out;
+  }
+  // Plain button accordion (native <details> misbehaves on some phones). One category open at a time.
+  function toggleCat(cat) {
+    const wasOpen = openCats.has(cat);
+    openCats.clear();
+    if (!wasOpen) openCats.add(cat);
+    openSheet();
+    renderSheet(true);
+    if (!wasOpen) requestAnimationFrame(() => {
+      const el = document.querySelector(`[data-cat="${cat}"]`);
+      if (el) el.scrollIntoView({ block: 'start', behavior: 'smooth' });
+    });
   }
   function askFlow(cat, it) {
     if (it.custom) {

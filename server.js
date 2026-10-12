@@ -281,8 +281,11 @@ const H = {
     if (me.id !== room.hostId) fail('Only the host can change settings.');
     if (room.phase !== 'lobby') fail('Settings are locked during a round.');
     const s = room.settings;
-    if (m.hideMinutes != null) s.hideMinutes = Math.min(90, Math.max(1, Math.round(+m.hideMinutes) || 30));
-    if (m.zoneRadius != null) s.zoneRadius = Math.min(500, Math.max(50, Math.round(+m.zoneRadius) || 200));
+    if (m.hideMinutes != null) {
+      const v = +m.hideMinutes;
+      s.hideMinutes = v > 0 && v < 1 ? 10 / 60 : Math.min(90, Math.max(1, Math.round(v) || 30)); // under 1 min = 10 s test mode
+    }
+    if (m.zoneRadius != null) s.zoneRadius = Math.min(1000, Math.max(50, Math.round(+m.zoneRadius) || 200));
     if (m.includeNaujamiestis != null) s.includeNaujamiestis = !!m.includeNaujamiestis;
   },
 
@@ -295,7 +298,8 @@ const H = {
     buildDeck(room);
     room.phase = 'hiding';
     room.hideEndsAt = Date.now() + room.settings.hideMinutes * MIN;
-    event(room, `Round ${room.round} started. ${room.settings.hideMinutes} minutes to hide!`);
+    const hm = room.settings.hideMinutes;
+    event(room, `Round ${room.round} started. ${hm < 1 ? '10 seconds' : hm + ' minutes'} to hide!`);
   },
 
   endHiding(ws, m, room, me) {
