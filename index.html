@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#16213A">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Slėpynės – Vilnius hide and seek</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🕯️</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body data-screen="home">
+  <div id="map" aria-label="Map of the play area"></div>
+  <div id="fog" hidden><p>The fog is in. Your map is hidden by a curse.</p><span data-countdown-fog></span></div>
+
+  <!-- Home -->
+  <section id="home" class="panel home">
+    <h1>Slėpynės</h1>
+    <p class="sub">Hide and seek on foot in Vilnius Old Town. One hides, everyone else hunts with questions.</p>
+    <label class="field">Your name
+      <input id="name" maxlength="20" autocomplete="nickname" placeholder="e.g. Simas">
+    </label>
+    <button id="btn-create" class="btn primary wide">Create a game</button>
+    <div class="or">or join one</div>
+    <div class="row">
+      <input id="code" maxlength="4" placeholder="CODE" autocapitalize="characters" autocomplete="off" aria-label="Game code">
+      <button id="btn-join" class="btn">Join</button>
+    </div>
+    <p class="fineprint">Keep this page open while you play. It uses your location to run the game.</p>
+  </section>
+
+  <!-- In game -->
+  <header id="topbar" hidden>
+    <button id="btn-menu" class="iconbtn" aria-label="Menu">☰</button>
+    <div class="clock">
+      <span id="phase-label">Lobby</span>
+      <strong id="timer">--:--</strong>
+    </div>
+    <span id="role-chip" class="chip">Seeker</span>
+  </header>
+
+  <div id="banners" hidden></div>
+
+  <section id="sheet" hidden>
+    <button id="sheet-handle" aria-label="Expand or collapse panel"><span></span></button>
+    <nav id="tabs" role="tablist"></nav>
+    <div id="sheet-body"></div>
+  </section>
+
+  <dialog id="menu">
+    <div class="menu-inner">
+      <div class="menu-head">
+        <h2>Game <span id="menu-code"></span></h2>
+        <button class="iconbtn" data-close aria-label="Close">✕</button>
+      </div>
+      <div id="menu-body"></div>
+    </div>
+  </dialog>
+
+  <dialog id="modal">
+    <div class="menu-inner" id="modal-body"></div>
+  </dialog>
+
+  <div id="toasts" aria-live="polite"></div>
+  <div id="conn" hidden>Reconnecting…</div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+  <script src="/cards.js"></script>
+  <script src="/zones.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
