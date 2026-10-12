@@ -728,9 +728,10 @@
   let zonesKey = '', notesKey = '';
   function initMap() {
     map = L.map('map', { zoomControl: false, attributionControl: true }).setView([Z.start.lat, Z.start.lng], 15);
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
-      maxZoom: 20, subdomains: 'abcd',
-      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    // OpenStreetMap tiles, no API key needed. Darkened with CSS (.map-tiles in style.css).
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19, className: 'map-tiles',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(map);
     L.control.zoom({ position: 'topright' }).addTo(map);
     const Locate = L.Control.extend({

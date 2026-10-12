@@ -34,6 +34,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 #map { position: fixed; inset: 0; z-index: 0; background: #0f1830; }
 .leaflet-container { font-family: var(--body); }
+.map-tiles { filter: invert(1) hue-rotate(180deg) brightness(.9) contrast(.85) saturate(.6); }
 .leaflet-control-attribution { font-size: 10px; background: rgba(22,33,58,.7) !important; color: var(--muted); }
 .leaflet-control-attribution a { color: var(--plaster); }
 .leaflet-top { top: calc(64px + var(--safe-top)); }

@@ -256,8 +256,14 @@ const H = {
     const room = rooms.get(String(m.code || '').toUpperCase().trim());
     if (!room) { ws.send(JSON.stringify({ type: 'error', code: 'NO_ROOM', message: 'No game with that code. Check the code or create a new game.' })); return null; }
     let pid = m.pid && room.players[m.pid] ? m.pid : null;
-    if (pid) { if (m.name) room.players[pid].name = cleanText(m.name, 20) || room.players[pid].name; }
-    else { pid = newPlayer(room, m.name); event(room, `${room.players[pid].name} joined.`); }
+    const name = cleanText(m.name, 20);
+    if (!pid && name) {
+      // Same name as someone who is offline: give them their old seat back (new phone, cleared browser, dead battery...)
+      const same = Object.values(room.players).find((p) => p.name.toLowerCase() === name.toLowerCase());
+      if (same && !same.connected) { pid = same.id; event(room, `${same.name} is back.`); }
+      else if (same) m.name = `${name} ${Object.keys(room.players).length + 1}`;
+    }
+    if (!pid) { pid = newPlayer(room, m.name); event(room, `${room.players[pid].name} joined.`); }
     attach(ws, room, pid);
     return room;
   },
@@ -643,7 +649,7 @@ setInterval(() => {
     ws.isAlive = false;
     try { ws.ping(); } catch {}
   }
-}, 25000);
+}, 15000);
 
 // Game clock
 setInterval(() => {
