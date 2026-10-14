@@ -4,6 +4,17 @@
   const C = window.CARDS;
   const Z = window.ZONES;
   const MIN = 60000;
+  const BUILD = 5;
+  // Detect a half-finished upload: every file carries the same version number.
+  function staleFiles(serverBuild) {
+    const css = getComputedStyle(document.documentElement).getPropertyValue('--build').trim();
+    const old = [];
+    if (css !== String(BUILD)) old.push('style.css');
+    if (C.VERSION !== BUILD) old.push('cards.js');
+    if (Z.VERSION !== BUILD) old.push('zones.js');
+    if (serverBuild != null && serverBuild !== BUILD) old.push('server.js');
+    return old;
+  }
 
   // ---------- tiny DOM helpers ----------
   const $ = (s, el = document) => el.querySelector(s);
@@ -38,16 +49,10 @@
   }
   const fmtM = (m) => (m >= 1000 ? (m / 1000).toFixed(2) + ' km' : Math.round(m) + ' m');
   const clockTime = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-  function inPoly(p, poly) {
-    let inside = false;
-    for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
-      const [yi, xi] = poly[i], [yj, xj] = poly[j];
-      if ((yi > p.lat) !== (yj > p.lat) && p.lng < ((xj - xi) * (p.lat - yi)) / (yj - yi) + xi) inside = !inside;
-    }
-    return inside;
-  }
   const activeAreas = () => Object.values(Z.areas).filter((a) => !a.optional || !S || S.settings.includeNaujamiestis);
-  const inPlayArea = (p) => activeAreas().some((a) => inPoly(p, a.coords));
+  const inPlayArea = (p) => Z.contains(p, !S || S.settings.includeNaujamiestis); // same check the server uses
+  const GPS_MAX_AGE = 120000;
+  const gpsFresh = () => !!myPos && Date.now() - myPos.t < GPS_MAX_AGE;
   // local metric projection around an origin, for thermometer geometry
   const toXY = (o, p) => ({ x: (p.lng - o.lng) * 111320 * Math.cos(o.lat * Math.PI / 180), y: (p.lat - o.lat) * 110540 });
   const fromXY = (o, v) => [o.lat + v.y / 110540, o.lng + v.x / (111320 * Math.cos(o.lat * Math.PI / 180))];
@@ -71,18 +76,53 @@
   const isHost = () => S && S.me === S.hostId;
 
   // ---------- connection ----------
+  // One live socket at a time, retries with growing gaps, a ping every minute,
+  // and no game actions until the server has confirmed we are back in the game.
+  let retryTimer = null, retryDelay = 1500, pongTimer = null;
+  let joined = false, resumePending = false;
   function connect() {
+    clearTimeout(retryTimer); retryTimer = null;
+    if (ws && ws.readyState < 2) return;
     const proto = location.protocol === 'https:' ? 'wss' : 'ws';
-    ws = new WebSocket(`${proto}://${location.host}/ws`);
-    ws.onopen = () => {
-      $('#conn').hidden = true;
+    const socket = new WebSocket(`${proto}://${location.host}/ws`);
+    ws = socket;
+    joined = false;
+    socket.onopen = () => {
+      if (ws !== socket) return;
       const s = store.get();
-      if (s.code && s.pid) send({ type: 'join', code: s.code, pid: s.pid, name: s.name });
+      if (s.code && (s.pid || s.name)) {
+        resumePending = true;
+        send({ type: 'join', code: s.code, pid: s.pid, token: s.token, name: s.name });
+      } else { retryDelay = 1500; $('#conn').hidden = true; }
     };
-    ws.onmessage = (e) => { let m; try { m = JSON.parse(e.data); } catch { return; } onMessage(m); };
-    ws.onclose = () => { if (S) $('#conn').hidden = false; setTimeout(connect, 1500); };
+    socket.onmessage = (e) => {
+      if (ws !== socket) return;
+      let m; try { m = JSON.parse(e.data); } catch { return; }
+      if (m.type === 'pong') { clearTimeout(pongTimer); pongTimer = null; return; }
+      onMessage(m);
+    };
+    socket.onclose = () => {
+      if (ws !== socket) return;
+      joined = false;
+      clearTimeout(pongTimer); pongTimer = null;
+      if (S) $('#conn').hidden = false;
+      retryTimer = setTimeout(connect, retryDelay);
+      retryDelay = Math.min(retryDelay * 2, 30000);
+    };
   }
+  function ping() {
+    if (!ws || ws.readyState > 1) { connect(); return; }
+    if (ws.readyState !== 1 || pongTimer) return;
+    const socket = ws;
+    socket.send(JSON.stringify({ type: 'ping' }));
+    pongTimer = setTimeout(() => { if (ws === socket) socket.close(); }, 15000);
+  }
+  setInterval(ping, 60000);
   function send(m, quiet) {
+    if (!['create', 'join'].includes(m.type) && !joined) {
+      if (!quiet) toast('Rejoining your game. Try again in a moment.', 'err');
+      return false;
+    }
     if (ws && ws.readyState === 1) { ws.send(JSON.stringify(m)); return true; }
     if (!quiet) toast('Not connected. Trying again in a moment.', 'err');
     return false;
@@ -90,10 +130,13 @@
 
   function onMessage(m) {
     if (m.type === 'joined') {
-      store.set({ ...store.get(), code: m.code, pid: m.pid, name: m.name });
+      store.set({ ...store.get(), code: m.code, pid: m.pid, token: m.token, name: m.name });
       history.replaceState(null, '', '/?join=' + m.code);
       startGeo(); keepAwake();
     } else if (m.type === 'state') {
+      joined = true; retryDelay = 1500;
+      $('#conn').hidden = true;
+      if (resumePending) { sentAt = 0; sentPos = null; resumePending = false; }
       const first = !S;
       offset = m.state.serverNow - Date.now();
       const prevPhase = S && S.phase;
@@ -104,10 +147,12 @@
       if (prevPhase !== S.phase && ['lobby', 'hiding'].includes(S.phase)) fitArea();
       if (first) pushPos(true);
     } else if (m.type === 'error') {
-      if (m.code === 'NO_ROOM') {
-        const s = store.get(); delete s.code; delete s.pid; store.set(s);
+      if (m.code === 'NO_ROOM' || m.code === 'INVALID_SESSION') {
+        joined = false; resumePending = false;
+        const s = store.get(); delete s.code; delete s.pid; delete s.token; store.set(s);
         S = null; document.body.dataset.screen = 'home';
         $('#topbar').hidden = $('#sheet').hidden = $('#banners').hidden = true;
+        $('#conn').hidden = true;
       }
       toast(m.message, 'err');
     }
@@ -128,9 +173,9 @@
     const n = nameValue(); const code = $('#code').value.trim().toUpperCase();
     if (!n) return;
     if (code.length !== 4) { toast('The game code has 4 letters.', 'err'); return; }
-    const s = store.get(); if (s.code !== code) { delete s.pid; s.code = code; store.set(s); }
+    const s = store.get(); if (s.code !== code) { delete s.pid; delete s.token; s.code = code; store.set(s); }
     startGeo();
-    send({ type: 'join', code, name: n, pid: store.get().pid });
+    send({ type: 'join', code, name: n, pid: store.get().pid, token: store.get().token });
   });
   $('#code').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('#btn-join').click(); });
 
@@ -138,7 +183,7 @@
   function startGeo() {
     if (geoWatch != null || !navigator.geolocation) return;
     geoWatch = navigator.geolocation.watchPosition((p) => {
-      myPos = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy };
+      myPos = { lat: p.coords.latitude, lng: p.coords.longitude, acc: p.coords.accuracy, t: p.timestamp || Date.now() };
       pushPos(); drawMe(); renderBanners();
       if (followMe && map) map.panTo([myPos.lat, myPos.lng]);
     }, (err) => {
@@ -146,11 +191,11 @@
     }, { enableHighAccuracy: true, maximumAge: 5000, timeout: 30000 });
   }
   function pushPos(force) {
-    if (!myPos || !S) return;
+    if (!S || !gpsFresh()) return;
     const t = Date.now();
     const moved = !sentPos || dist(sentPos, myPos) > 8;
     if (force || (moved && t - sentAt > 3000) || t - sentAt > 15000) {
-      if (send({ type: 'pos', lat: myPos.lat, lng: myPos.lng, acc: myPos.acc }, true)) { sentPos = myPos; sentAt = t; }
+      if (send({ type: 'pos', lat: myPos.lat, lng: myPos.lng, acc: myPos.acc, t: myPos.t + offset }, true)) { sentPos = myPos; sentAt = t; }
     }
   }
   setInterval(() => pushPos(), 5000);
@@ -160,7 +205,7 @@
     try { if ('wakeLock' in navigator && document.visibilityState === 'visible' && !wakeLock) { wakeLock = await navigator.wakeLock.request('screen'); wakeLock.addEventListener('release', () => { wakeLock = null; }); } } catch {}
   }
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') { keepAwake(); pushPos(true); if (!ws || ws.readyState > 1) connect(); }
+    if (document.visibilityState === 'visible') { keepAwake(); ping(); pushPos(true); }
   });
 
   // ---------- feedback ----------
@@ -235,7 +280,12 @@
     if (!S) return;
     const box = $('#banners'); const b = [];
     const hider = isHider();
+    const old = staleFiles(S.build);
+    if (old.length) b.push(h('div', { class: 'banner alert' }, `Website update incomplete. Outdated on the server: ${old.join(', ')}. Re-upload all files.`));
     if (S.paused) b.push(h('div', { class: 'banner info' }, 'Paused by the host.'));
+    if (['hiding', 'seeking'].includes(S.phase) && !gpsFresh()) {
+      b.push(h('div', { class: 'banner alert' }, 'Waiting for a recent GPS position. Keep this page open and allow location access.'));
+    }
     if (S.phase === 'hiding' && !hider) b.push(h('div', { class: 'banner' }, 'Hiding time. Wait at ' + Z.start.name + '.'));
     if (S.endgame && S.phase === 'seeking') b.push(h('div', { class: 'banner alert' }, hider ? 'Seekers are inside your zone. Do not move!' : 'A seeker is inside the hiding zone. The hider is frozen.'));
     if (S.moving) b.push(h('div', { class: 'banner alert' }, hider ? 'Walk to a new spot, then lock your zone. ' : 'The hider is relocating. Stay where you are. ', h('span', { 'data-countdown': S.moving.until })));
@@ -681,8 +731,8 @@
       if (S.phase === 'hiding') out.push(h('button', { class: 'btn wide', onclick: () => send({ type: 'unlockZone' }) }, 'Unlock and move on'));
     } else if (['hiding', 'seeking'].includes(S.phase)) {
       const outside = myPos && !inPlayArea(myPos);
-      out.push(h('button', { class: 'btn primary wide', disabled: !myPos || outside, onclick: () => send({ type: 'lockZone' }) },
-        !myPos ? 'Waiting for GPS…' : outside ? 'Get inside the play area first' : (S.moving ? 'Lock new zone here' : 'Lock zone here')));
+      out.push(h('button', { class: 'btn primary wide', disabled: !gpsFresh() || outside, onclick: () => send({ type: 'lockZone' }) },
+        !gpsFresh() ? 'Waiting for GPS…' : outside ? 'Get inside the play area first' : (S.moving ? 'Lock new zone here' : 'Lock zone here')));
       if (myPos) out.push(h('p', { class: 'muted small' }, `GPS accuracy about ${Math.round(myPos.acc)} m.`));
     }
     if (S.phase === 'seeking') out.push(h('p', { class: 'muted small' }, 'Once a seeker enters your zone, everyone is told and you must stop moving.'));
@@ -730,8 +780,9 @@
         h('button', { class: 'btn danger wide', onclick: () => confirmBox('Abort this round?', 'Nothing is recorded. Everyone goes back to the lobby.', 'Abort round', () => send({ type: 'abort' }), true) }, 'Abort round')) : null,
       !host && hostP && !hostP.connected ? h('button', { class: 'btn wide', onclick: () => send({ type: 'claimHost' }) }, 'Become host (host is offline)') : null,
       h('div', { class: 'section' }, h('h3', {}, 'Rules'), h('ol', { class: 'rules' }, C.RULES.map((r) => h('li', {}, r)))),
+      h('p', { class: 'muted small' }, `Version ${BUILD}`, staleFiles(S.build).length ? ` – outdated files: ${staleFiles(S.build).join(', ')}` : ' – all files up to date'),
       h('button', { class: 'btn ghost wide', onclick: () => confirmBox('Leave this game?', 'You can rejoin with the code later as a new player.', 'Leave', () => {
-        send({ type: 'leave' }); const s = store.get(); delete s.code; delete s.pid; store.set(s); location.href = '/';
+        send({ type: 'leave' }); const s = store.get(); delete s.code; delete s.pid; delete s.token; store.set(s); location.href = '/';
       }, true) }, 'Leave game'),
     ].filter(Boolean));
   }
@@ -743,9 +794,10 @@
   let zonesKey = '', notesKey = '';
   function initMap() {
     map = L.map('map', { zoomControl: false, attributionControl: true }).setView([Z.start.lat, Z.start.lng], 15);
+    map.attributionControl.setPosition('topright'); // bottom is covered by the panel
     // OpenStreetMap tiles, no API key needed. Darkened with CSS (.map-tiles in style.css).
     L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
-      maxZoom: 19, className: 'map-tiles',
+      maxNativeZoom: 19, maxZoom: 20, className: 'map-tiles',
       attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
     }).addTo(map);
     L.control.zoom({ position: 'topright' }).addTo(map);
@@ -863,6 +915,10 @@
   function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
 
   // ---------- boot ----------
+  window.addEventListener('load', () => {
+    const old = staleFiles(null);
+    if (old.length) $('#home').prepend(h('div', { class: 'banner alert' }, `Website update incomplete. Outdated on the server: ${old.join(', ')}.`));
+  });
   initMap();
   connect();
   if (store.get().code && store.get().pid) startGeo();

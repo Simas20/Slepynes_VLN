@@ -65,13 +65,19 @@
       answer: 'yesno', minutes: 5, reward: { draw: 2, keep: 1 },
       blurb: 'Are you within a set distance of us?',
       items: [
-        { id: 'ra-100',  meters: 100,  text: 'Are you within 100 m of us?' },
-        { id: 'ra-200',  meters: 200,  text: 'Are you within 200 m of us?' },
-        { id: 'ra-300',  meters: 300,  text: 'Are you within 300 m of us?' },
-        { id: 'ra-500',  meters: 500,  text: 'Are you within 500 m of us?' },
-        { id: 'ra-750',  meters: 750,  text: 'Are you within 750 m of us?' },
+        { id: 'ra-50', meters: 50, text: 'Are you within 50 m of us?' },
+        { id: 'ra-100', meters: 100, text: 'Are you within 100 m of us?' },
+        { id: 'ra-150', meters: 150, text: 'Are you within 150 m of us?' },
+        { id: 'ra-200', meters: 200, text: 'Are you within 200 m of us?' },
+        { id: 'ra-250', meters: 250, text: 'Are you within 250 m of us?' },
+        { id: 'ra-300', meters: 300, text: 'Are you within 300 m of us?' },
+        { id: 'ra-400', meters: 400, text: 'Are you within 400 m of us?' },
+        { id: 'ra-500', meters: 500, text: 'Are you within 500 m of us?' },
+        { id: 'ra-600', meters: 600, text: 'Are you within 600 m of us?' },
+        { id: 'ra-750', meters: 750, text: 'Are you within 750 m of us?' },
         { id: 'ra-1000', meters: 1000, text: 'Are you within 1 km of us?' },
         { id: 'ra-1500', meters: 1500, text: 'Are you within 1.5 km of us?' },
+        { id: 'ra-2000', meters: 2000, text: 'Are you within 2 km of us?' },
         { id: 'ra-custom', meters: null, text: 'Are you within {m} m of us?', custom: true },
       ],
     },
@@ -80,10 +86,14 @@
       answer: 'hotter', minutes: 5, reward: { draw: 2, keep: 1 },
       blurb: 'Walk a set distance, then ask if you got closer.',
       items: [
+        { id: 'th-50', meters: 50, text: 'We walked 50 m. Are we hotter or colder?' },
+        { id: 'th-75', meters: 75, text: 'We walked 75 m. Are we hotter or colder?' },
         { id: 'th-100', meters: 100, text: 'We walked 100 m. Are we hotter or colder?' },
         { id: 'th-150', meters: 150, text: 'We walked 150 m. Are we hotter or colder?' },
         { id: 'th-200', meters: 200, text: 'We walked 200 m. Are we hotter or colder?' },
+        { id: 'th-250', meters: 250, text: 'We walked 250 m. Are we hotter or colder?' },
         { id: 'th-300', meters: 300, text: 'We walked 300 m. Are we hotter or colder?' },
+        { id: 'th-400', meters: 400, text: 'We walked 400 m. Are we hotter or colder?' },
         { id: 'th-500', meters: 500, text: 'We walked 500 m. Are we hotter or colder?' },
       ],
     },
@@ -193,7 +203,7 @@
     'Stay on public streets and open courtyards. No entering homes, paid venues or closed areas. Watch the traffic, it is dark.',
   ];
 
-  const api = { LANDMARKS, QUESTIONS, DECK, CARD_BY_ID, QUESTION_BY_ID, RULES };
+  const api = { VERSION: 5, LANDMARKS, QUESTIONS, DECK, CARD_BY_ID, QUESTION_BY_ID, RULES };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.CARDS = api;
 })(typeof window !== 'undefined' ? window : globalThis);

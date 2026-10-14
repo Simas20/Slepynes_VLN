@@ -9,6 +9,7 @@ const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const PUBLIC_DIR = fs.existsSync(path.join(__dirname, 'public')) ? path.join(__dirname, 'public') : __dirname;
 const C = require(path.join(PUBLIC_DIR, 'cards.js'));
+const Z = require(path.join(PUBLIC_DIR, 'zones.js'));
 
 const PORT = process.env.PORT || 3000;
 const MIME = {
@@ -17,7 +18,15 @@ const MIME = {
   '.png': 'image/png', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json',
 };
 
+const BUILD = 5; // bump together with BUILD in app.js
 const MIN = 60 * 1000;
+// Basic limits so a free server can't be flooded
+const MAX_ROOMS = 100, MAX_PLAYERS = 20, MAX_SOCKETS = 500;
+const MAX_ROOM_PHOTOS = 8 * 1024 * 1024, MAX_TOTAL_PHOTOS = 32 * 1024 * 1024;
+const RATE_WINDOW = 10000, RATE_MAX = 60;
+// Actions that are blocked while the host has paused the game
+const PAUSED_ACTIONS = new Set(['lockZone', 'unlockZone', 'ask', 'thermoAsk', 'cancelQuestion', 'answer', 'keep', 'discard', 'play', 'clearCurse', 'found']);
+let shuttingDown = false;
 const rooms = new Map();          // code -> room
 const conns = new Map();          // code -> Set<ws>
 
@@ -42,6 +51,7 @@ const fail = (msg) => { throw new GameError(msg); };
 
 // ---------- room lifecycle ----------
 function createRoom() {
+  if (rooms.size >= MAX_ROOMS) fail('The server is full. Try again later.');
   const room = {
     code: newCode(), created: Date.now(), touched: Date.now(), hostId: null, round: 1,
     players: {},
@@ -71,7 +81,12 @@ function event(room, text, to) {
 
 const hiders = (room) => Object.values(room.players).filter((p) => p.role === 'hider');
 const seekers = (room) => Object.values(room.players).filter((p) => p.role === 'seeker');
-function hiderPos(room) { const h = hiders(room).find((p) => p.pos); return h ? h.pos : null; }
+// GPS older than 2 minutes is ignored everywhere
+const freshPos = (p) => !!(p && p.pos && Date.now() - p.pos.t < 2 * MIN);
+function hiderPos(room) {
+  const h = hiders(room).find((p) => freshPos(p) && Z.contains(p.pos, room.settings.includeNaujamiestis));
+  return h ? h.pos : null;
+}
 
 function seekElapsed(room, now = Date.now()) {
   if (!room.seekStartedAt) return 0;
@@ -127,7 +142,7 @@ function removeFromHand(room, uids) {
 const cardName = (inst) => (C.CARD_BY_ID[inst.id] || {}).name || inst.id;
 
 // ---------- phases ----------
-function beginSeeking(room) {
+function beginSeeking(room, startedAt = Date.now()) {
   if (!room.zone) {
     const pos = hiderPos(room);
     if (pos) {
@@ -138,13 +153,13 @@ function beginSeeking(room) {
     }
   }
   room.phase = 'seeking';
-  room.seekStartedAt = Date.now();
+  room.seekStartedAt = startedAt;
   event(room, 'Hiding time is over. Seekers, go!');
 }
 
 function checkEndgame(room) {
-  if (room.phase !== 'seeking' || !room.zone || room.endgame || room.moving) return;
-  const inside = seekers(room).some((s) => s.pos && Date.now() - s.pos.t < 2 * MIN && dist(s.pos, room.zone) <= room.zone.r);
+  if (room.phase !== 'seeking' || room.paused || !room.zone || room.endgame || room.moving) return;
+  const inside = seekers(room).some((s) => freshPos(s) && dist(s.pos, room.zone) <= room.zone.r);
   if (inside) {
     room.endgame = true;
     event(room, 'A seeker is inside the hiding zone. The hider must not move from now on.');
@@ -184,7 +199,7 @@ function viewFor(room, pid) {
   const isHider = !!me && me.role === 'hider';
   const reveal = room.phase === 'ended';
   return {
-    serverNow: Date.now(), me: pid, code: room.code, round: room.round, phase: room.phase,
+    serverNow: Date.now(), build: BUILD, me: pid, code: room.code, round: room.round, phase: room.phase,
     settings: room.settings, hostId: room.hostId,
     players: Object.values(room.players).map((p) => ({
       id: p.id, name: p.name, role: p.role, connected: p.connected,
@@ -220,7 +235,8 @@ function attach(ws, room, pid) {
   if (!conns.has(room.code)) conns.set(room.code, new Set());
   conns.get(room.code).add(ws);
   room.players[pid].connected = true;
-  ws.send(JSON.stringify({ type: 'joined', code: room.code, pid, name: room.players[pid].name }));
+  const p = room.players[pid];
+  ws.send(JSON.stringify({ type: 'joined', code: room.code, pid, token: p.token, name: p.name }));
 }
 function detach(ws) {
   if (!ws.meta) return;
@@ -236,8 +252,10 @@ function detach(ws) {
 }
 
 function newPlayer(room, name) {
+  if (Object.keys(room.players).length >= MAX_PLAYERS) fail(`This game is full (${MAX_PLAYERS} players).`);
   const pid = rid(6);
-  room.players[pid] = { id: pid, name: cleanText(name, 20) || 'Player', role: 'seeker', connected: true, pos: null };
+  // token is private to this player's browser (ids are visible to everyone, tokens never are)
+  room.players[pid] = { id: pid, token: rid(32), name: cleanText(name, 20) || 'Player', role: 'seeker', connected: true, pos: null };
   if (!room.hostId) room.hostId = pid;
   return pid;
 }
@@ -255,7 +273,10 @@ const H = {
   join(ws, m) {
     const room = rooms.get(String(m.code || '').toUpperCase().trim());
     if (!room) { ws.send(JSON.stringify({ type: 'error', code: 'NO_ROOM', message: 'No game with that code. Check the code or create a new game.' })); return null; }
-    let pid = m.pid && room.players[m.pid] ? m.pid : null;
+    // 1) Same browser: saved id + private token puts you straight back.
+    const saved = m.pid && Object.hasOwn(room.players, m.pid) ? room.players[m.pid] : null;
+    let pid = saved && typeof m.token === 'string' && m.token === saved.token ? saved.id : null;
+    // 2) Otherwise join by name. An OFFLINE player with the same name gets their seat back.
     const name = cleanText(m.name, 20);
     if (!pid && name) {
       // Same name as someone who is offline: give them their old seat back (new phone, cleared browser, dead battery...)
@@ -312,13 +333,18 @@ const H = {
   pos(ws, m, room, me) {
     const lat = +m.lat, lng = +m.lng;
     if (!isFinite(lat) || !isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return;
-    me.pos = { lat, lng, acc: Math.round(+m.acc || 0), t: Date.now() };
+    // t is when the phone took the reading, already converted to server time by the client
+    let t = m.t == null ? Date.now() : Number(m.t);
+    if (!Number.isFinite(t) || t > Date.now() + 30000 || Date.now() - t >= 2 * MIN) return;
+    if (me.pos && t < me.pos.t) return;
+    me.pos = { lat, lng, acc: Math.max(0, Math.round(+m.acc || 0)), t: Math.min(t, Date.now()) };
     checkEndgame(room);
   },
 
   lockZone(ws, m, room, me) {
     if (me.role !== 'hider') fail('Only the hider can lock the zone.');
-    if (!me.pos) fail('No GPS position yet. Allow location access and wait a moment.');
+    if (!freshPos(me)) fail('No recent GPS position. Allow location access and wait a moment.');
+    if (!Z.contains(me.pos, room.settings.includeNaujamiestis)) fail('Get inside the play area before locking your zone.');
     if (room.phase === 'seeking' && room.zone && !room.moving) fail('Your zone is already locked.');
     if (!['hiding', 'seeking'].includes(room.phase)) fail('Not now.');
     room.zone = { lat: me.pos.lat, lng: me.pos.lng, r: room.settings.zoneRadius, lockedAt: Date.now() };
@@ -346,7 +372,7 @@ const H = {
     if (room.used.includes(q.id)) fail('That question was already asked this round.');
     const def = C.QUESTIONS[q.cat];
     const needsPos = ['radar', 'measuring', 'thermometer', 'tentacles', 'matching'].includes(q.cat);
-    if (needsPos && !me.pos) fail('This question needs your GPS position. Allow location access first.');
+    if (needsPos && !freshPos(me)) fail('This question needs a recent GPS position. Allow location access first.');
     let text = q.text, meters = q.meters || null;
     if (q.custom) {
       meters = Math.round(+m.meters);
@@ -374,7 +400,7 @@ const H = {
     const q = room.question;
     if (me.role !== 'seeker') fail('Only seekers can do that.');
     if (!q || q.status !== 'walking') fail('No thermometer in progress.');
-    if (!me.pos) fail('No GPS position.');
+    if (!freshPos(me)) fail('No recent GPS position.');
     q.endPos = { lat: me.pos.lat, lng: me.pos.lng };
     q.walked = Math.round(dist(q.startPos, q.endPos));
     if (q.walked < q.meters * 0.8) fail(`You have only walked about ${q.walked} m of ${q.meters} m.`);
@@ -406,6 +432,11 @@ const H = {
       if (!mt) fail('Attach a photo first.');
       const buf = Buffer.from(mt[3], 'base64');
       if (buf.length > 4 * 1024 * 1024) fail('Photo is too large.');
+      const photoBytes = (r) => Object.values(r.photos).reduce((n, ph) => n + ph.buf.length, 0);
+      const total = [...rooms.values()].reduce((n, r) => n + photoBytes(r), 0);
+      if (photoBytes(room) + buf.length > MAX_ROOM_PHOTOS || total + buf.length > MAX_TOTAL_PHOTOS) {
+        fail('Photo storage is full. Finish this round before adding more photos.');
+      }
       const photoId = rid(8);
       room.photos[photoId] = { mime: mt[1], buf };
       ans.photo = `/photo/${room.code}/${photoId}`;
@@ -552,7 +583,7 @@ const H = {
   resume(ws, m, room, me) {
     if (me.id !== room.hostId) fail('Only the host can resume.');
     if (!room.paused) fail('The game is not paused.');
-    resume(room); event(room, 'Game resumed.');
+    resume(room); checkEndgame(room); event(room, 'Game resumed.');
   },
 
   newRound(ws, m, room, me) {
@@ -619,13 +650,24 @@ const server = http.createServer((req, res) => {
 // ---------- WebSocket ----------
 const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 8 * 1024 * 1024 });
 wss.on('connection', (ws) => {
+  if (shuttingDown || wss.clients.size > MAX_SOCKETS) { ws.close(1013, 'Server is busy. Try again later.'); return; }
   ws.meta = null;
   ws.isAlive = true;
+  let windowStart = Date.now(), count = 0;
   ws.on('pong', () => { ws.isAlive = true; });
   ws.on('message', (raw) => {
+    if (Date.now() - windowStart >= RATE_WINDOW) { windowStart = Date.now(); count = 0; }
+    if (++count > RATE_MAX) {
+      if (count === RATE_MAX + 1) {
+        ws.send(JSON.stringify({ type: 'error', code: 'RATE_LIMIT', message: 'Too many messages. Reconnecting…' }));
+        ws.close(1008, 'Too many messages.');
+      }
+      return;
+    }
     let m;
     try { m = JSON.parse(raw); } catch { return; }
-    if (!m || typeof m.type !== 'string' || !H[m.type]) return;
+    if (m && m.type === 'ping') { ws.send(JSON.stringify({ type: 'pong', serverNow: Date.now() })); return; }
+    if (!m || typeof m.type !== 'string' || !Object.hasOwn(H, m.type) || shuttingDown) return;
     try {
       let room;
       if (m.type === 'create' || m.type === 'join') {
@@ -635,6 +677,7 @@ wss.on('connection', (ws) => {
         room = rooms.get(ws.meta.code);
         const me = room && room.players[ws.meta.pid];
         if (!me) fail('You are no longer in this game.');
+        if (room.paused && PAUSED_ACTIONS.has(m.type)) fail('The game is paused.');
         H[m.type](ws, m, room, me);
       }
       if (room) { room.touched = Date.now(); broadcast(room); }
@@ -661,7 +704,7 @@ setInterval(() => {
   for (const room of rooms.values()) {
     let changed = false;
     if (!room.paused) {
-      if (room.phase === 'hiding' && now >= room.hideEndsAt) { beginSeeking(room); changed = true; }
+      if (room.phase === 'hiding' && now >= room.hideEndsAt) { beginSeeking(room, room.hideEndsAt); changed = true; }
       const before = room.curses.length;
       room.curses = room.curses.filter((c) => !c.expiresAt || c.expiresAt > now);
       if (room.curses.length !== before) { event(room, 'A timed curse has worn off.'); changed = true; }
@@ -687,4 +730,15 @@ setInterval(() => {
   }
 }, 1000);
 
-server.listen(PORT, () => console.log(`Hide + seek server on http://localhost:${PORT}`));
+// Render sends SIGTERM before restarts. Tell phones to reconnect, then exit cleanly.
+function shutdown() {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  for (const ws of wss.clients) ws.close(1001, 'Server restarting.');
+  server.close(() => process.exit(0));
+  setTimeout(() => process.exit(0), 3000).unref();
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);
+
+server.listen(PORT, () => console.log(`Hide + seek server on http://localhost:${server.address().port}`));

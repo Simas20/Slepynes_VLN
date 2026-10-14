@@ -2,6 +2,16 @@
 
 A small web app for a walking hide and seek game in Senamiestis (and optionally Naujamiestis), inspired by the Jet Lag style of play. One person hides, everyone else hunts them down by asking questions. Everything runs in the phone browser, nobody installs anything.
 
+## Latest changes
+
+- Private reconnect token per player. Your browser gets you straight back in, and nobody can take over an online player's seat.
+- Lost your phone? Join with the same code and name on another phone and you get your old seat back (only while the old one is offline).
+- Steadier reconnecting (growing retry gaps, a check every minute, no actions sent until you are back in the game).
+- GPS older than 2 minutes is ignored, so a stale position can't freeze the hider.
+- The server checks the play area borders and the pause, not only the page.
+- Limits against spam (100 games, 20 players per game, 60 messages per 10 seconds, photo storage caps).
+- Automatic checks with `npm test`.
+
 ## What is in the box
 
 ```
@@ -13,6 +23,7 @@ public/cards.js          All questions, cards, curses and rules (edit freely)
 public/zones.js          Play area polygons (edit to move the borders)
 vilnius-play-area.kml    Same borders, for Google My Maps if you want them there too
 render.yaml              One-click config for Render hosting
+test/                    Automatic checks (run with npm test, optional)
 ```
 
 ## Try it on your laptop first
@@ -24,7 +35,7 @@ npm install
 npm start
 ```
 
-Open http://localhost:3000 in two browser windows, create a game in one and join with the code in the other. Location works on localhost. On a real phone the site must be on HTTPS, which the hosting below gives you for free.
+Run `npm test` to check everything still works after a change. Open http://localhost:3000 in two browser windows, create a game in one and join with the code in the other. Location works on localhost. On a real phone the site must be on HTTPS, which the hosting below gives you for free.
 
 ## Put it online (about 20 minutes, 1 to 2 EUR)
 

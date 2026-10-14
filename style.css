@@ -1,5 +1,6 @@
 /* Night in the Old Town: slate-blue sky, plaster walls, sodium lamps, the Neris. */
 :root {
+  --build: 5; /* must match BUILD in app.js */
   --night: #16213A;
   --night-2: #1F2C4B;
   --night-3: #2A3A60;
@@ -126,7 +127,7 @@ body[data-paused="1"] #timer { opacity: .5; }
   background: var(--night); border-top: 1.5px solid var(--night-3);
   border-radius: var(--radius-l) var(--radius-l) 0 0;
   padding-bottom: var(--safe-bottom);
-  max-height: 62vh; display: flex; flex-direction: column;
+  max-height: 62vh; max-height: 70dvh; display: flex; flex-direction: column; overflow: hidden;
   box-shadow: 0 -10px 30px rgba(0,0,0,.35);
 }
 #sheet.collapsed #sheet-body { display: none; }
@@ -139,7 +140,9 @@ body[data-paused="1"] #timer { opacity: .5; }
 }
 #tabs button[aria-selected="true"] { background: var(--night-2); color: var(--plaster); }
 #tabs .dot { position: absolute; top: 6px; right: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--curse); }
-#sheet-body { overflow-y: auto; padding: 4px 14px 16px; display: grid; gap: 14px; align-content: start; }
+#sheet-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 4px 14px 24px; display: block; }
+#sheet-body > * + * { margin-top: 14px; }
+#sheet-body > .cat + .cat { margin-top: 8px; }
 #sheet-body h3 { font-size: 20px; }
 .section { display: grid; gap: 10px; }
 
@@ -170,19 +173,22 @@ body[data-paused="1"] #timer { opacity: .5; }
   border-radius: var(--radius-s); background: var(--night-2); overflow: hidden;
   border-left: 6px solid var(--cat);
 }
-.cat > summary {
-  list-style: none; cursor: pointer; padding: 11px 12px; display: flex; align-items: baseline; gap: 10px;
+.cat-head {
+  appearance: none; border: 0; background: transparent; width: 100%; text-align: left; cursor: pointer;
+  padding: 13px 12px; display: flex; align-items: baseline; gap: 10px; min-height: 48px; touch-action: manipulation;
 }
-.cat > summary::-webkit-details-marker { display: none; }
-.cat > summary b { font-family: var(--display); font-size: 18px; }
-.cat > summary .muted { flex: 1; font-size: 14px; }
+.cat-head b { font-family: var(--display); font-size: 18px; }
+.cat-head .muted { flex: 1; min-width: 0; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cat-head .chev { font-size: 14px; color: var(--muted); }
+.cat.open { background: var(--night-3); }
 .cat .count { font-size: 13px; color: var(--muted); }
 .qlist { display: grid; gap: 6px; padding: 0 10px 10px; }
 .q {
   appearance: none; text-align: left; width: 100%; padding: 10px 12px; border-radius: var(--radius-s);
   border: 1.5px solid var(--night-3); background: var(--night); cursor: pointer; line-height: 1.35;
 }
-.q:disabled { cursor: not-allowed; opacity: .35; text-decoration: line-through; }
+.q:disabled { cursor: not-allowed; opacity: .5; }
+.q.used { opacity: .3; text-decoration: line-through; }
 .reward { font-size: 12px; color: var(--muted); padding: 0 12px 8px; }
 
 .qcard {
