@@ -18,7 +18,7 @@ const MIME = {
   '.png': 'image/png', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json',
 };
 
-const BUILD = 9; // bump together with BUILD in app.js
+const BUILD = 10; // bump together with BUILD in app.js
 const MIN = 60 * 1000;
 // Basic limits so a free server can't be flooded
 const MAX_ROOMS = 100, MAX_PLAYERS = 20, MAX_SOCKETS = 500;

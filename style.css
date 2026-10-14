@@ -1,6 +1,6 @@
 /* Night in the Old Town: slate-blue sky, plaster walls, sodium lamps, the Neris. */
 :root {
-  --build: 9; /* must match BUILD in app.js */
+  --build: 10; /* must match BUILD in app.js */
   --night: #16213A;
   --night-2: #1F2C4B;
   --night-3: #2A3A60;
@@ -327,6 +327,8 @@ body.board-open { overflow: hidden; }
 #board-map { position: absolute; inset: 0; background: #0f1830; }
 #board-close { white-space: nowrap; }
 #board-map.drawing { cursor: crosshair; }
+/* In draw mode the finger belongs to the drawing: the phone must not turn it into a pan/scroll */
+#board-map.drawing, #board-map.drawing * { touch-action: none !important; }
 #board-top {
   position: absolute; z-index: 1000; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 12px;
   padding: calc(10px + var(--safe-top)) 10px 18px; background: linear-gradient(var(--night) 65%, rgba(22,33,58,0));

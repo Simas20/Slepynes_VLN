@@ -4,7 +4,7 @@
   const C = window.CARDS;
   const Z = window.ZONES;
   const MIN = 60000;
-  const BUILD = 9;
+  const BUILD = 10;
   // Detect a half-finished upload: every file carries the same version number.
   function staleFiles(serverBuild) {
     const css = getComputedStyle(document.documentElement).getPropertyValue('--build').trim();
@@ -1034,7 +1034,15 @@
       if (board.cur && e.pointerId === board.cur.pid) finishStroke();
     };
     boardMapEl.addEventListener('pointerup', end, true);
-    boardMapEl.addEventListener('pointercancel', (e) => { board.pointers.delete(e.pointerId); cancelStroke(); }, true);
+    // If the phone interrupts the gesture anyway, keep what was drawn instead of throwing it away
+    boardMapEl.addEventListener('pointercancel', (e) => {
+      board.pointers.delete(e.pointerId);
+      if (board.cur && e.pointerId === board.cur.pid) finishStroke();
+    }, true);
+    // Older phone browsers ignore touch-action: block their scrolling while drawing with one finger
+    boardMapEl.addEventListener('touchmove', (e) => {
+      if (board.tool !== 'move' && board.cur && e.touches.length === 1) e.preventDefault();
+    }, { passive: false, capture: true });
   }
   function cancelStroke() { board.cur = null; board.preview.clearLayers(); }
   function strokeLayer(tool, color, latlngs) {

@@ -6,7 +6,7 @@
    Naujamiestis  West of Senamiestis down to Naugarduko g. and Geležinio Vilko g., shares its east edge
                  with Senamiestis so there is no gap between the two. */
 const ZONES = {
-  VERSION: 9,
+  VERSION: 10,
   start: { name: 'Cathedral Square', lat: 54.68577, lng: 25.28766 },
   areas: {
     senamiestis: {
