@@ -198,3 +198,78 @@ test('message flooding is rejected without disconnecting another player', { time
   const pong = await host.act({ type: 'ping' }, (m) => m.type === 'pong');
   assert.equal(typeof pong.serverNow, 'number');
 });
+
+test('random roles pick 1 hider for small groups, 2 for 6+, and rotate who hides', { timeout: 15000 }, async (t) => {
+  const server = await start(t);
+  const { host, identity } = await create(t, server);
+  const others = [];
+  for (let i = 0; i < 4; i++) {
+    const c = await connect(t, server.url);
+    await c.act({ type: 'join', code: identity.code, name: `P${i}` }, (m) => m.type === 'joined');
+    others.push(c);
+  }
+  let state = (await host.act({ type: 'randomRoles' })).state;
+  assert.equal(state.players.filter((p) => p.role === 'hider').length, 1);
+  // play 5 quick rounds: everyone should hide once before anyone hides twice
+  const hidden = [];
+  for (let r = 0; r < 5; r++) {
+    state = (await host.act({ type: 'randomRoles' })).state;
+    hidden.push(state.players.find((p) => p.role === 'hider').name);
+    await host.act({ type: 'start' });
+    await host.act({ type: 'abort' });
+  }
+  assert.equal(new Set(hidden).size, 5);
+  for (let i = 0; i < 2; i++) {
+    const c = await connect(t, server.url);
+    await c.act({ type: 'join', code: identity.code, name: `Q${i}` }, (m) => m.type === 'joined');
+  }
+  state = (await host.act({ type: 'randomRoles' })).state;
+  assert.equal(state.players.length, 7);
+  assert.equal(state.players.filter((p) => p.role === 'hider').length, 2);
+});
+
+test('new games default to 20 min hiding and a 200 m zone, and everyone is told when a seeker enters the zone', { timeout: 10000 }, async (t) => {
+  const server = await start(t);
+  const { host, identity } = await create(t, server);
+  const seeker = await connect(t, server.url);
+  await seeker.act({ type: 'join', code: identity.code, name: 'Seeker' }, (m) => m.type === 'joined');
+  const lobby = await host.act({ type: 'setRole', role: 'hider' });
+  assert.equal(lobby.state.settings.hideMinutes, 20);
+  assert.equal(lobby.state.settings.zoneRadius, 200);
+  await host.act({ type: 'start' });
+  await host.act({ type: 'pos', lat: 54.68577, lng: 25.28766, acc: 5, t: Date.now() });
+  await host.act({ type: 'lockZone' });
+  await host.act({ type: 'endHiding' });
+  const outside = await seeker.act({ type: 'pos', lat: 54.68577 + 0.0025, lng: 25.28766, acc: 5, t: Date.now() }); // ~280 m away
+  assert.equal(outside.state.endgame, false);
+  const inside = await seeker.act({ type: 'pos', lat: 54.68577 + 0.0015, lng: 25.28766, acc: 5, t: Date.now() }); // ~170 m away
+  assert.equal(inside.state.endgame, true);
+  const hiderView = await host.next((m) => m.type === 'state' && m.state.endgame);
+  assert.ok(hiderView.state.events.some((e) => e.text.includes('inside the hiding zone')));
+});
+
+test('drawing board is shared by seekers, hidden from the hider, and revealed when the round ends', { timeout: 10000 }, async (t) => {
+  const server = await start(t);
+  const { host, identity } = await create(t, server);
+  const s1 = await connect(t, server.url);
+  const s2 = await connect(t, server.url);
+  await s1.act({ type: 'join', code: identity.code, name: 'S1' }, (m) => m.type === 'joined');
+  await s2.act({ type: 'join', code: identity.code, name: 'S2' }, (m) => m.type === 'joined');
+  await host.act({ type: 'setRole', role: 'hider' });
+  await host.act({ type: 'start' });
+  const line = [[54.6858, 25.2877], [54.6850, 25.2890], [54.6840, 25.2900]];
+  const rejected = await host.act({ type: 'draw', tool: 'pen', color: '#F2A33A', pts: line }, (m) => m.type === 'error');
+  assert.match(rejected.message, /only seekers/i);
+  const hostCursor = host.messages.length;
+  await s1.act({ type: 'draw', tool: 'shade', color: '#E0565B', pts: line }, (m) => m.type === 'drawings' && m.items.length === 1);
+  const seen = await s2.next((m) => m.type === 'drawings' && m.items.length === 1);
+  assert.equal(seen.items[0].byName, 'S1');
+  await new Promise((r) => setTimeout(r, 200));
+  assert.equal(host.messages.slice(hostCursor).some((m) => m.type === 'drawings' && m.items.length), false);
+  const undone = await s2.act({ type: 'undoDraw' }, (m) => m.type === 'error');
+  assert.match(undone.message, /nothing to undo/i); // S2 cannot undo S1's line
+  await s1.act({ type: 'endHiding' }, (m) => m.type === 'error'); // not host
+  await host.act({ type: 'endHiding' });
+  const revealed = await host.act({ type: 'found' }, (m) => m.type === 'drawings' && m.items.length === 1);
+  assert.equal(revealed.items[0].tool, 'shade');
+});

@@ -1,6 +1,6 @@
 /* Night in the Old Town: slate-blue sky, plaster walls, sodium lamps, the Neris. */
 :root {
-  --build: 6; /* must match BUILD in app.js */
+  --build: 9; /* must match BUILD in app.js */
   --night: #16213A;
   --night-2: #1F2C4B;
   --night-3: #2A3A60;
@@ -135,9 +135,24 @@ body[data-paused="1"] #timer { opacity: .5; }
   padding-bottom: calc(40px + var(--safe-bottom));
   box-shadow: 0 -10px 30px rgba(0,0,0,.35);
 }
-#sheet-handle { appearance: none; border: 0; background: none; padding: 8px 0 2px; cursor: pointer; display: block; width: 100%; }
+#sheet-head { position: relative; z-index: 4; height: 40px; }
+#sheet-handle { appearance: none; border: 0; background: none; padding: 0; height: 40px; cursor: pointer; display: block; width: 100%; }
+#sheet-close {
+  position: absolute; right: 10px; top: 7px; appearance: none; border: 1.5px solid var(--night-3); background: var(--night-2);
+  color: var(--muted); font-weight: 700; font-size: 13px; padding: 4px 10px; border-radius: 999px; cursor: pointer;
+}
+/* Panel hidden: full-screen map, one button to bring the panel back */
+body.panel-closed #sheet, body.panel-closed #spacer { display: none; }
+#sheet-open {
+  position: fixed; z-index: 40; left: 50%; transform: translateX(-50%); bottom: calc(18px + var(--safe-bottom));
+  appearance: none; border: 0; border-radius: 999px; padding: 12px 22px; font-weight: 700; font-size: 16px; cursor: pointer;
+  background: var(--role); color: #13110a; box-shadow: 0 6px 20px rgba(0,0,0,.45);
+}
+#sheet-open .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--curse); margin-left: 8px; vertical-align: middle; }
+#sheet-open .dot[hidden] { display: none; }
+body.panel-closed #conn { bottom: calc(76px + var(--safe-bottom)); }
 #sheet-handle span { display: block; margin: 0 auto; width: 44px; height: 5px; border-radius: 3px; background: var(--night-3); }
-body.scrolled #banners { display: none; }
+body.scrolled #banners .banner:not(.keep) { display: none; }
 #tabs {
   display: flex; gap: 4px; padding: 6px 10px 8px; overflow-x: auto;
   position: sticky; top: calc(58px + var(--safe-top)); z-index: 3; background: var(--night);
@@ -306,4 +321,35 @@ body.modal-open #menu { display: none; }
 .pin.hider { background: var(--neris); color: #06201c; }
 .pin.ask { background: #fff; color: #1d2235; }
 .lm { font-size: 11px; font-weight: 700; color: var(--plaster); text-shadow: 0 0 3px #000, 0 0 3px #000; white-space: nowrap; transform: translate(-50%, 4px); display: inline-block; }
+/* drawing board */
+#board { position: fixed; inset: 0; z-index: 90; background: #0f1830; }
+body.board-open { overflow: hidden; }
+#board-map { position: absolute; inset: 0; background: #0f1830; }
+#board-close { white-space: nowrap; }
+#board-map.drawing { cursor: crosshair; }
+#board-top {
+  position: absolute; z-index: 1000; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 12px;
+  padding: calc(10px + var(--safe-top)) 10px 18px; background: linear-gradient(var(--night) 65%, rgba(22,33,58,0));
+}
+.board-title { display: grid; line-height: 1.2; }
+.board-title b { font-family: var(--display); font-size: 20px; }
+#board-note { font-size: 13px; color: var(--muted); }
+#board-tools {
+  position: absolute; z-index: 1000; left: 0; right: 0; bottom: 0; display: grid; gap: 8px;
+  padding: 10px 10px calc(12px + var(--safe-bottom)); background: var(--night); border-top: 1.5px solid var(--night-3);
+}
+.tool-row { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; align-items: center; }
+.tool {
+  appearance: none; border: 1.5px solid var(--night-3); background: var(--night-2); color: var(--plaster);
+  border-radius: 999px; padding: 9px 14px; font-weight: 700; cursor: pointer; min-height: 42px;
+}
+.tool[aria-pressed="true"] { background: var(--lamp); color: #1a1406; border-color: transparent; }
+#swatches { display: inline-flex; gap: 6px; margin-right: 6px; }
+.swatch { width: 34px; height: 34px; border-radius: 50%; border: 3px solid var(--night); outline: 2px solid var(--night-3); cursor: pointer; padding: 0; }
+.swatch[aria-pressed="true"] { outline: 3px solid #fff; }
+#board.readonly #board-tools { display: none; }
+#board-map .board-name { background: var(--night); color: var(--plaster); border: 0; font-weight: 700; font-size: 12px; padding: 2px 6px; box-shadow: none; }
+#board-map .board-name::before { display: none; }
+#board-map .leaflet-top { top: calc(70px + var(--safe-top)); }
+
 .zone-label { font-family: var(--display); font-weight: 800; font-size: 15px; color: #fff; text-shadow: 0 0 4px #000; white-space: nowrap; }

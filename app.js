@@ -4,7 +4,7 @@
   const C = window.CARDS;
   const Z = window.ZONES;
   const MIN = 60000;
-  const BUILD = 6;
+  const BUILD = 9;
   // Detect a half-finished upload: every file carries the same version number.
   function staleFiles(serverBuild) {
     const css = getComputedStyle(document.documentElement).getPropertyValue('--build').trim();
@@ -64,6 +64,7 @@
 
   // ---------- state ----------
   let ws = null, S = null, offset = 0, myPos = null;
+  let drawings = [];
   let lastEventId = null, lastQuestionId = null, seenLog = 0;
   let tab = null, sheetKey = '', geoWatch = null, sentPos = null, sentAt = 0;
   let showNotes = true, showLandmarks = true, followMe = false;
@@ -146,6 +147,9 @@
       render();
       if (prevPhase !== S.phase && ['lobby', 'hiding'].includes(S.phase)) fitArea();
       if (first) pushPos(true);
+    } else if (m.type === 'drawings') {
+      drawings = m.items || [];
+      renderBoardStrokes();
     } else if (m.type === 'error') {
       if (m.code === 'NO_ROOM' || m.code === 'INVALID_SESSION') {
         joined = false; resumePending = false;
@@ -217,6 +221,10 @@
   }
   function buzz(pattern) { try { navigator.vibrate && navigator.vibrate(pattern); } catch {} }
   let audio = null;
+  // Phones only allow sound after the first tap, so prepare the audio on any tap.
+  document.addEventListener('pointerdown', () => {
+    try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); if (audio.state === 'suspended') audio.resume(); } catch {}
+  }, { once: false, passive: true });
   function beep() {
     try {
       audio = audio || new (window.AudioContext || window.webkitAudioContext)();
@@ -231,13 +239,15 @@
     if (fresh.length) lastEventId = fresh[fresh.length - 1].id;
     fresh.slice(-3).forEach((e) => {
       const curse = e.text.startsWith('Curse!');
-      toast(e.text, curse ? 'curse' : '');
+      const zoneEntered = e.text.includes('inside the hiding zone');
+      toast(e.text, curse || zoneEntered ? 'curse' : '');
       if (curse && !isHider()) buzz([300, 100, 300]);
+      if (zoneEntered) { buzz([600, 150, 600, 150, 600]); beep(); setTimeout(beep, 300); }
     });
     const q = S.question;
     if (q && q.status === 'asked' && q.id !== lastQuestionId) {
       lastQuestionId = q.id;
-      if (isHider()) { buzz([200, 100, 200, 100, 400]); beep(); tab = 'question'; openSheet(); renderSheet(true); }
+      if (isHider()) { buzz([200, 100, 200, 100, 400]); beep(); tab = 'question'; showPanel(); renderSheet(true); }
     }
   }
 
@@ -263,6 +273,7 @@
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
     if (isOpen($('#modal'))) closeOverlay($('#modal')); else if (isOpen($('#menu'))) closeOverlay($('#menu'));
+    else if (!$('#board').hidden) $('#board-close').click();
   });
 
   function openModal(build) {
@@ -295,7 +306,7 @@
     $('#topbar').hidden = false; $('#sheet').hidden = false; $('#spacer').hidden = false;
     $('#role-chip').textContent = me && me.role === 'hider' ? 'Hider' : 'Seeker';
     drawZones(); drawNotes(); drawPlayers(); drawMe();
-    renderBanners(); renderSheet(); handleEvents(); tick();
+    renderBanners(); renderSheet(); handleEvents(); tick(); updateOpenButton(); syncBoard();
     if (isOpen($('#menu'))) renderMenu();
   }
   let menuKey = '';
@@ -311,7 +322,7 @@
       b.push(h('div', { class: 'banner alert' }, 'Waiting for a recent GPS position. Keep this page open and allow location access.'));
     }
     if (S.phase === 'hiding' && !hider) b.push(h('div', { class: 'banner' }, 'Hiding time. Wait at ' + Z.start.name + '.'));
-    if (S.endgame && S.phase === 'seeking') b.push(h('div', { class: 'banner alert' }, hider ? 'Seekers are inside your zone. Do not move!' : 'A seeker is inside the hiding zone. The hider is frozen.'));
+    if (S.endgame && S.phase === 'seeking') b.push(h('div', { class: 'banner alert keep' }, hider ? 'Seekers are inside your zone. Do not move!' : 'A seeker is inside the hiding zone. The hider is frozen.'));
     if (S.moving) b.push(h('div', { class: 'banner alert' }, hider ? 'Walk to a new spot, then lock your zone. ' : 'The hider is relocating. Stay where you are. ', h('span', { 'data-countdown': S.moving.until })));
     if (hider && S.question && S.question.status === 'asked') b.push(h('div', { class: 'banner alert' }, 'New question! Time left ', h('span', { 'data-countdown': S.question.deadline })));
     if (!hider) S.curses.slice(0, 2).forEach((c) => b.push(h('div', { class: 'banner curse' }, c.name, c.expiresAt ? h('span', {}, ' ', h('span', { 'data-countdown': c.expiresAt })) : null)));
@@ -363,6 +374,20 @@
   $('#sheet-handle').addEventListener('click', () => {
     if (window.scrollY > 10) window.scrollTo({ top: 0, behavior: 'smooth' }); else openSheet();
   });
+  // Hide / show the whole panel (full-screen map)
+  const panelClosed = () => document.body.classList.contains('panel-closed');
+  function closePanel() {
+    document.body.classList.add('panel-closed'); window.scrollTo(0, 0); updateOpenButton();
+    if (S && ['lobby', 'hiding'].includes(S.phase)) fitArea(); // show the whole play area on the full-screen map
+  }
+  function showPanel() { if (!panelClosed()) return; document.body.classList.remove('panel-closed'); updateOpenButton(); }
+  function updateOpenButton() {
+    const btn = $('#sheet-open');
+    btn.hidden = !(panelClosed() && S && document.body.dataset.screen === 'game');
+    btn.querySelector('.dot').hidden = !(S && tabsFor().some(([id]) => tabDot(id)));
+  }
+  $('#sheet-close').addEventListener('click', closePanel);
+  $('#sheet-open').addEventListener('click', showPanel);
   const onScroll = () => document.body.classList.toggle('scrolled', window.scrollY > 40);
   window.addEventListener('scroll', onScroll, { passive: true });
 
@@ -448,6 +473,9 @@
         h('label', { class: 'check' },
           h('input', { type: 'checkbox', checked: s.includeNaujamiestis, disabled: !host, onchange: (e) => send({ type: 'settings', includeNaujamiestis: e.target.checked }) }),
           'Include Naujamiestis')),
+      host ? h('div', { class: 'section' },
+        h('button', { class: 'btn wide', disabled: S.players.filter((p) => p.connected).length < 2, onclick: () => send({ type: 'randomRoles' }) }, '🎲 Randomize hider and seekers'),
+        h('p', { class: 'muted small' }, 'Picks 1 hider for 2–5 players, 2 for 6–9, 3 for 10 or more. Whoever has hidden least goes first.')) : null,
       host
         ? h('button', { class: 'btn primary wide', disabled: !(hasHider && hasSeeker), onclick: () => send({ type: 'start' }) },
           hasHider && hasSeeker ? `Start round ${S.round}` : 'Pick at least one hider and one seeker')
@@ -582,7 +610,10 @@
       ? h('button', { class: 'btn danger wide', onclick: () => confirmBox('End the round?', 'Only press this when a seeker has seen the hider and called them out.', 'Found!', () => send({ type: 'found' }), true) }, label)
       : null;
   }
-  function viewTools() { return [...commonTools(), foundButton('We found the hider')]; }
+  function boardButton(label) { return h('button', { class: 'btn wide', onclick: openBoard }, label); }
+  function viewTools() {
+    return [S.phase === 'ended' ? null : boardButton('🖍️ Open the drawing board'), ...commonTools(), foundButton('We found the hider')];
+  }
 
   // ----- hider: question -----
   function hint(q) {
@@ -789,6 +820,7 @@
         h('thead', {}, h('tr', {}, h('th', {}, 'Round'), h('th', {}, 'Hider'), h('th', {}, 'Total'))),
         h('tbody', {}, S.results.map((r) => h('tr', {}, h('td', {}, r.round), h('td', {}, r.hiders, r === best ? ' 🏆' : ''), h('td', { class: 'num' }, fmt(r.totalMs)))))),
       h('p', { class: 'muted small' }, 'The hider\'s zone and route positions are now shown on the map.'),
+      boardButton('🖍️ See the seekers\' drawing board'),
       isHost() ? h('button', { class: 'btn primary wide', onclick: () => send({ type: 'newRound' }) }, 'Back to lobby for the next round')
         : h('p', { class: 'muted' }, 'Waiting for the host to start the next round.'),
     ];
@@ -862,7 +894,7 @@
     if (!map) return;
     const pts = activeAreas().flatMap((a) => a.coords);
     const sh = $('#sheet');
-    const bottom = sh.hidden ? 40 : Math.max(40, Math.min(window.innerHeight * 0.6, window.innerHeight - sh.getBoundingClientRect().top) + 10);
+    const bottom = sh.hidden || panelClosed() ? 40 : Math.max(40, Math.min(window.innerHeight * 0.6, window.innerHeight - sh.getBoundingClientRect().top) + 10);
     map.fitBounds(L.latLngBounds(pts), { paddingTopLeft: [10, 80], paddingBottomRight: [10, bottom] });
   }
   function drawZones(force) {
@@ -919,22 +951,26 @@
     notesKey = key;
     layers.notes.clearLayers();
     if (!showNotes) return;
+    notesInto(layers.notes);
+  }
+  // Answer circles / half-planes, drawn into any layer group (main map and drawing board)
+  function notesInto(group) {
     const DARK = { color: '#000', fillColor: '#000', fillOpacity: 0.38, weight: 0 };
     for (const q of S.qlog) {
       if (q.status !== 'answered' || !q.answer) continue;
       const col = C.QUESTIONS[q.cat].color;
       const label = `${C.QUESTIONS[q.cat].label} – ${q.text} Answer ${q.answer.choice || q.answer.text || 'photo'}`;
-      if (q.askerPos) L.circleMarker([q.askerPos.lat, q.askerPos.lng], { radius: 5, color: col, weight: 2, fillOpacity: 1 }).bindPopup(escapeHtml(label)).addTo(layers.notes);
+      if (q.askerPos) L.circleMarker([q.askerPos.lat, q.askerPos.lng], { radius: 5, color: col, weight: 2, fillOpacity: 1 }).bindPopup(escapeHtml(label)).addTo(group);
       if (q.cat === 'radar' && q.askerPos && q.meters && q.answer.choice) {
         const yes = q.answer.choice === 'yes';
         L.circle([q.askerPos.lat, q.askerPos.lng], yes ? { radius: q.meters, color: col, weight: 2, fillOpacity: 0.08 } : { radius: q.meters, ...DARK, weight: 2, color: col, dashArray: '6 6' })
-          .bindPopup(escapeHtml(label)).addTo(layers.notes);
+          .bindPopup(escapeHtml(label)).addTo(group);
       }
       if (q.cat === 'measuring' && q.landmark && q.askerPos && q.answer.choice) {
         const lm = C.LANDMARKS[q.landmark]; const r = dist(q.askerPos, lm);
         const closer = q.answer.choice === 'closer';
         L.circle([lm.lat, lm.lng], closer ? { radius: r, color: col, weight: 2, fillOpacity: 0.08 } : { radius: r, ...DARK, weight: 2, color: col, dashArray: '6 6' })
-          .bindPopup(escapeHtml(label)).addTo(layers.notes);
+          .bindPopup(escapeHtml(label)).addTo(group);
       }
       if (q.cat === 'thermometer' && q.startPos && q.endPos && q.answer.choice) {
         const o = { lat: (q.startPos.lat + q.endPos.lat) / 2, lng: (q.startPos.lng + q.endPos.lng) / 2 };
@@ -943,12 +979,153 @@
         const sgn = q.answer.choice === 'hotter' ? -1 : 1; // shade the side the hider is NOT on
         const a = { x: p.x * Lm, y: p.y * Lm }, b = { x: -p.x * Lm, y: -p.y * Lm };
         const poly = [a, b, { x: b.x + sgn * u.x * Lm, y: b.y + sgn * u.y * Lm }, { x: a.x + sgn * u.x * Lm, y: a.y + sgn * u.y * Lm }].map((v) => fromXY(o, v));
-        L.polygon(poly, DARK).bindPopup(escapeHtml(label)).addTo(layers.notes);
-        L.polyline([[q.startPos.lat, q.startPos.lng], [q.endPos.lat, q.endPos.lng]], { color: col, weight: 4 }).bindPopup(escapeHtml(label)).addTo(layers.notes);
+        L.polygon(poly, DARK).bindPopup(escapeHtml(label)).addTo(group);
+        L.polyline([[q.startPos.lat, q.startPos.lng], [q.endPos.lat, q.endPos.lng]], { color: col, weight: 4 }).bindPopup(escapeHtml(label)).addTo(group);
       }
     }
   }
   function escapeHtml(s) { return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])); }
+
+  // ---------- drawing board ----------
+  // A separate full-screen map. Seekers draw together; the hider only sees it after the round.
+  const PALETTE = ['#F2A33A', '#5FC3B4', '#E0565B', '#F3E9D6', '#A78BFA'];
+  const board = { map: null, ctx: null, strokes: null, preview: null, tool: 'move', color: PALETTE[0], cur: null, pointers: new Set() };
+  const boardEl = $('#board'), boardMapEl = $('#board-map');
+  const boardOpen = () => !boardEl.hidden;
+  const fogActive = () => S && !isHider() && S.phase === 'seeking' && S.curses.some((c) => c.blind);
+  function canDraw() { return S && !isHider() && ['hiding', 'seeking'].includes(S.phase); }
+  function canViewBoard() { return S && (S.phase === 'ended' || (!isHider() && ['hiding', 'seeking'].includes(S.phase))); }
+
+  function initBoard() {
+    if (board.map) return;
+    board.map = L.map(boardMapEl, { zoomControl: false, attributionControl: true });
+    board.map.attributionControl.setPosition('topright');
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxNativeZoom: 19, maxZoom: 20, className: 'map-tiles',
+      attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors',
+    }).addTo(board.map);
+    L.control.zoom({ position: 'topright' }).addTo(board.map);
+    board.ctx = L.layerGroup().addTo(board.map);
+    board.strokes = L.layerGroup().addTo(board.map);
+    board.preview = L.layerGroup().addTo(board.map);
+    $('#swatches').replaceChildren(...PALETTE.map((c) => h('button', {
+      class: 'swatch', style: `background:${c}`, 'aria-label': 'Colour ' + c, 'aria-pressed': String(c === board.color),
+      onclick: (e) => { board.color = c; document.querySelectorAll('.swatch').forEach((b) => b.setAttribute('aria-pressed', String(b === e.currentTarget))); },
+    })));
+    // drawing with one finger / mouse; a second finger cancels (so pinch-zoom still works)
+    const cp = (e) => board.map.mouseEventToContainerPoint(e);
+    boardMapEl.addEventListener('pointerdown', (e) => {
+      board.pointers.add(e.pointerId);
+      if (board.tool === 'move' || !canDraw()) return;
+      if (board.pointers.size > 1) { cancelStroke(); return; }
+      e.preventDefault(); e.stopPropagation();
+      try { boardMapEl.setPointerCapture(e.pointerId); } catch {}
+      board.cur = { pid: e.pointerId, px: [cp(e)] };
+      redrawPreview();
+    }, true);
+    boardMapEl.addEventListener('pointermove', (e) => {
+      if (!board.cur || e.pointerId !== board.cur.pid) return;
+      e.preventDefault(); e.stopPropagation();
+      const p = cp(e), last = board.cur.px[board.cur.px.length - 1];
+      if (p.distanceTo(last) >= 3) { board.cur.px.push(p); redrawPreview(); }
+    }, true);
+    const end = (e) => {
+      board.pointers.delete(e.pointerId);
+      if (board.cur && e.pointerId === board.cur.pid) finishStroke();
+    };
+    boardMapEl.addEventListener('pointerup', end, true);
+    boardMapEl.addEventListener('pointercancel', (e) => { board.pointers.delete(e.pointerId); cancelStroke(); }, true);
+  }
+  function cancelStroke() { board.cur = null; board.preview.clearLayers(); }
+  function strokeLayer(tool, color, latlngs) {
+    return tool === 'shade'
+      ? L.polygon(latlngs, { color, weight: 2.5, dashArray: '6 6', fillColor: '#000', fillOpacity: 0.42 })
+      : L.polyline(latlngs, { color, weight: 5, opacity: 0.95, lineCap: 'round', lineJoin: 'round' });
+  }
+  function redrawPreview() {
+    board.preview.clearLayers();
+    if (!board.cur || board.cur.px.length < 2) return;
+    strokeLayer(board.tool, board.color, board.cur.px.map((p) => board.map.containerPointToLatLng(p))).addTo(board.preview);
+  }
+  function simplifyPx(P, eps) {
+    if (P.length < 3) return P;
+    const a = P[0], b = P[P.length - 1], dx = b.x - a.x, dy = b.y - a.y, n = Math.hypot(dx, dy) || 1;
+    let best = 0, idx = 0;
+    for (let i = 1; i < P.length - 1; i++) { const d = Math.abs(dx * (P[i].y - a.y) - dy * (P[i].x - a.x)) / n; if (d > best) { best = d; idx = i; } }
+    if (best <= eps) return [a, b];
+    return [...simplifyPx(P.slice(0, idx + 1), eps).slice(0, -1), ...simplifyPx(P.slice(idx), eps)];
+  }
+  function finishStroke() {
+    const cur = board.cur; board.cur = null;
+    if (!cur) return;
+    let px = simplifyPx(cur.px, 1.5);
+    for (let eps = 3; px.length > 400; eps *= 2) px = simplifyPx(cur.px, eps);
+    const need = board.tool === 'shade' ? 3 : 2;
+    if (px.length < need) { board.preview.clearLayers(); return; }
+    const pts = px.map((p) => { const ll = board.map.containerPointToLatLng(p); return [ll.lat, ll.lng]; });
+    if (!send({ type: 'draw', tool: board.tool, color: board.color, pts })) { board.preview.clearLayers(); return; }
+    // keep the preview until the server's copy arrives, so the line never blinks away
+    setTimeout(() => board.preview.clearLayers(), 1500);
+  }
+  function renderBoardStrokes() {
+    if (!board.map) return;
+    board.strokes.clearLayers();
+    for (const d of drawings) {
+      strokeLayer(d.tool, d.color, d.pts).bindPopup(escapeHtml(`${d.tool === 'shade' ? 'Ruled out' : 'Drawn'} by ${d.byName} at ${clockTime(d.t)}`)).addTo(board.strokes);
+    }
+    board.preview.clearLayers();
+  }
+  function renderBoardContext() {
+    if (!board.map || !S) return;
+    board.ctx.clearLayers();
+    for (const a of activeAreas()) L.polygon(a.coords, { color: a.color, weight: 2, fillOpacity: 0.04, interactive: false }).addTo(board.ctx);
+    if (showNotes) notesInto(board.ctx);
+    for (const p of S.players) {
+      if (!p.pos || p.id === S.me) continue;
+      L.circleMarker([p.pos.lat, p.pos.lng], { radius: 6, color: '#fff', weight: 2, fillColor: p.role === 'hider' ? '#5FC3B4' : '#F2A33A', fillOpacity: 1, interactive: false })
+        .bindTooltip(escapeHtml(p.name), { permanent: true, direction: 'top', offset: [0, -6], className: 'board-name' }).addTo(board.ctx);
+    }
+    if (S.phase === 'ended' && S.zone) L.circle([S.zone.lat, S.zone.lng], { radius: S.zone.r, color: '#5FC3B4', weight: 3, fillOpacity: 0.15, interactive: false }).addTo(board.ctx);
+    if (myPos) L.circleMarker([myPos.lat, myPos.lng], { radius: 8, color: '#fff', weight: 3, fillColor: isHider() ? '#5FC3B4' : '#F2A33A', fillOpacity: 1, interactive: false }).addTo(board.ctx);
+  }
+  function setTool(t) {
+    board.tool = t;
+    document.querySelectorAll('.tool[data-tool]').forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.tool === t)));
+    boardMapEl.classList.toggle('drawing', t !== 'move');
+    if (!board.map) return;
+    if (t === 'move') board.map.dragging.enable(); else board.map.dragging.disable();
+  }
+  function openBoard() {
+    if (!canViewBoard()) { toast('The drawing board is for seekers. The hider sees it when the round ends.', 'err'); return; }
+    if (fogActive()) { toast('The fog curse hides every map, including the drawing board.', 'err'); return; }
+    initBoard();
+    boardEl.hidden = false;
+    document.body.classList.add('board-open');
+    boardEl.classList.toggle('readonly', !canDraw());
+    $('#board-note').textContent = canDraw() ? 'Only seekers see this. The hider sees it after the round.' : 'The seekers\' drawings from this round.';
+    board.map.invalidateSize();
+    if (map) board.map.setView(map.getCenter(), map.getZoom(), { animate: false });
+    setTool(canDraw() ? board.tool : 'move');
+    renderBoardContext(); renderBoardStrokes();
+  }
+  function closeBoard() {
+    cancelStroke();
+    boardEl.hidden = true;
+    document.body.classList.remove('board-open');
+  }
+  function syncBoard() {
+    $('#btn-board').hidden = !canViewBoard();
+    if (!boardOpen()) return;
+    if (!canViewBoard() || fogActive()) { closeBoard(); if (fogActive()) toast('The fog rolled in. The drawing board is hidden too.', 'curse'); return; }
+    boardEl.classList.toggle('readonly', !canDraw());
+    if (!canDraw()) setTool('move');
+    renderBoardContext();
+  }
+  $('#btn-board').addEventListener('click', openBoard);
+  $('#board-close').addEventListener('click', closeBoard);
+  document.querySelectorAll('.tool[data-tool]').forEach((b) => b.addEventListener('click', () => setTool(b.dataset.tool)));
+  $('#board-undo').addEventListener('click', () => send({ type: 'undoDraw' }));
+  $('#board-clear').addEventListener('click', () => confirmBox('Clear the whole board?', 'This removes every seeker\'s drawings for everyone.', 'Clear all', () => send({ type: 'clearDrawings' }), true));
 
   // ---------- boot ----------
   window.addEventListener('load', () => {

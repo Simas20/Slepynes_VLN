@@ -4,6 +4,9 @@ A small web app for a walking hide and seek game in Senamiestis (and optionally 
 
 ## Latest changes
 
+- Drawing board (🖍️ button at the top, or Tools tab). A separate map where seekers draw lines and rule out areas together. The hider can't see it until the round ends.
+- Randomize roles button, hide/show panel, 20 min / 200 m defaults, 2 min answers (3 for Tentacles, 5 for photos), two drinking curses.
+
 - Private reconnect token per player. Your browser gets you straight back in, and nobody can take over an online player's seat.
 - Lost your phone? Join with the same code and name on another phone and you get your old seat back (only while the old one is offline).
 - Steadier reconnecting (growing retry gaps, a check every minute, no actions sent until you are back in the game).

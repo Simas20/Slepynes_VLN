@@ -11,7 +11,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
-  <link rel="stylesheet" href="/style.css?v=6">
+  <link rel="stylesheet" href="/style.css?v=9">
 </head>
 <body data-screen="home">
   <div id="map" aria-label="Map of the play area"></div>
@@ -40,6 +40,7 @@
       <span id="phase-label">Lobby</span>
       <strong id="timer">--:--</strong>
     </div>
+    <button id="btn-board" class="iconbtn" aria-label="Drawing board" title="Drawing board" hidden>🖍️</button>
     <span id="role-chip" class="chip">Seeker</span>
   </header>
 
@@ -47,7 +48,10 @@
 
   <div id="spacer" hidden></div>
   <section id="sheet" hidden>
-    <button id="sheet-handle" aria-label="Expand or collapse panel"><span></span></button>
+    <div id="sheet-head">
+      <button id="sheet-handle" aria-label="Switch between map and panel"><span></span></button>
+      <button id="sheet-close" aria-label="Hide panel">Hide ▾</button>
+    </div>
     <nav id="tabs" role="tablist"></nav>
     <div id="sheet-body"></div>
   </section>
@@ -66,12 +70,34 @@
     <div class="menu-inner" id="modal-body"></div>
   </div>
 
+  <!-- Drawing board: its own full-screen map, shared by the seekers -->
+  <div id="board" hidden>
+    <div id="board-map" aria-label="Drawing board map"></div>
+    <div id="board-top">
+      <button id="board-close" class="btn small">✕ Close</button>
+      <div class="board-title"><b>Drawing board</b><span id="board-note"></span></div>
+    </div>
+    <div id="board-tools" role="toolbar" aria-label="Drawing tools">
+      <div class="tool-row">
+        <button class="tool" data-tool="move" aria-pressed="true">✋ Move</button>
+        <button class="tool" data-tool="pen" aria-pressed="false">✏️ Pen</button>
+        <button class="tool" data-tool="shade" aria-pressed="false">⬛ Rule out</button>
+      </div>
+      <div class="tool-row">
+        <span id="swatches"></span>
+        <button id="board-undo" class="tool">↶ Undo</button>
+        <button id="board-clear" class="tool">🗑 Clear</button>
+      </div>
+    </div>
+  </div>
+
+  <button id="sheet-open" hidden aria-label="Show panel">▴ Show panel<span class="dot" hidden></span></button>
   <div id="toasts" aria-live="polite"></div>
   <div id="conn" hidden>Reconnecting…</div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
-  <script src="/cards.js?v=6"></script>
-  <script src="/zones.js?v=6"></script>
-  <script src="/app.js?v=6"></script>
+  <script src="/cards.js?v=9"></script>
+  <script src="/zones.js?v=9"></script>
+  <script src="/app.js?v=9"></script>
 </body>
 </html>

@@ -18,12 +18,15 @@ const MIME = {
   '.png': 'image/png', '.ico': 'image/x-icon', '.webmanifest': 'application/manifest+json',
 };
 
-const BUILD = 6; // bump together with BUILD in app.js
+const BUILD = 9; // bump together with BUILD in app.js
 const MIN = 60 * 1000;
 // Basic limits so a free server can't be flooded
 const MAX_ROOMS = 100, MAX_PLAYERS = 20, MAX_SOCKETS = 500;
 const MAX_ROOM_PHOTOS = 8 * 1024 * 1024, MAX_TOTAL_PHOTOS = 32 * 1024 * 1024;
 const RATE_WINDOW = 10000, RATE_MAX = 60;
+// Drawing board: shared by seekers, hidden from the hider until the round ends
+const MAX_STROKES = 400, MAX_STROKE_POINTS = 400;
+const PALETTE = ['#F2A33A', '#5FC3B4', '#E0565B', '#F3E9D6', '#A78BFA'];
 // Actions that are blocked while the host has paused the game
 const PAUSED_ACTIONS = new Set(['lockZone', 'unlockZone', 'ask', 'thermoAsk', 'cancelQuestion', 'answer', 'keep', 'discard', 'play', 'clearCurse', 'found']);
 let shuttingDown = false;
@@ -55,7 +58,7 @@ function createRoom() {
   const room = {
     code: newCode(), created: Date.now(), touched: Date.now(), hostId: null, round: 1,
     players: {},
-    settings: { hideMinutes: 30, zoneRadius: 200, includeNaujamiestis: true },
+    settings: { hideMinutes: 20, zoneRadius: 200, includeNaujamiestis: true },
     results: [], photos: {}, events: [], eventSeq: 0,
   };
   resetRound(room);
@@ -71,8 +74,10 @@ function resetRound(room) {
     used: [], question: null, qlog: [],
     deck: [], discard: [], hand: [], handLimit: 6, draw: null, drawQueue: [], mustDiscard: 0,
     curses: [],
+    drawings: [], drawRev: (room.drawRev || 0) + 1,
   });
 }
+const canSeeDrawings = (room, pid) => room.phase === 'ended' || (room.players[pid] && room.players[pid].role === 'seeker');
 
 function event(room, text, to) {
   room.events.push({ id: ++room.eventSeq, t: Date.now(), text, to: to || null });
@@ -171,6 +176,7 @@ function finish(room, by) {
   if (room.paused) resume(room);
   room.phase = 'ended';
   room.endedAt = Date.now();
+  room.drawRev++;
   const seekMs = seekElapsed(room);
   const bonusMin = room.hand.reduce((s, c) => s + (C.CARD_BY_ID[c.id].kind === 'time' ? C.CARD_BY_ID[c.id].minutes : 0), 0);
   room.results.push({
@@ -224,7 +230,15 @@ function broadcast(room) {
   const set = conns.get(room.code);
   if (!set) return;
   for (const ws of set) {
-    if (ws.readyState === 1) ws.send(JSON.stringify({ type: 'state', state: viewFor(room, ws.meta.pid) }));
+    if (ws.readyState !== 1) continue;
+    ws.send(JSON.stringify({ type: 'state', state: viewFor(room, ws.meta.pid) }));
+    // Drawings travel separately and only when they change (they can be big)
+    const allowed = canSeeDrawings(room, ws.meta.pid);
+    const key = allowed ? room.drawRev : -1;
+    if (ws.drawKey !== key) {
+      ws.drawKey = key;
+      ws.send(JSON.stringify({ type: 'drawings', items: allowed ? room.drawings : [] }));
+    }
   }
 }
 
@@ -298,13 +312,28 @@ const H = {
     target.role = m.role;
   },
 
+  // Host button: pick hiders at random. 2-5 players 1 hider, 6-9 players 2, 10+ players 3.
+  // Players who have hidden the fewest times so far go first, random among equals.
+  randomRoles(ws, m, room, me) {
+    if (me.id !== room.hostId) fail('Only the host can do that.');
+    if (room.phase !== 'lobby') fail('Roles can only change in the lobby.');
+    const pool = Object.values(room.players).filter((p) => p.connected);
+    if (pool.length < 2) fail('You need at least 2 players online.');
+    const k = pool.length <= 5 ? 1 : pool.length <= 9 ? 2 : 3;
+    const order = shuffle([...pool]).sort((a, b) => (a.hidCount || 0) - (b.hidCount || 0));
+    const chosen = new Set(order.slice(0, k).map((p) => p.id));
+    for (const p of Object.values(room.players)) p.role = chosen.has(p.id) ? 'hider' : 'seeker';
+    const names = order.slice(0, k).map((p) => p.name).join(' & ');
+    event(room, `Roles drawn at random. ${k > 1 ? 'Hiders' : 'Hider'} ${names}.`);
+  },
+
   settings(ws, m, room, me) {
     if (me.id !== room.hostId) fail('Only the host can change settings.');
     if (room.phase !== 'lobby') fail('Settings are locked during a round.');
     const s = room.settings;
     if (m.hideMinutes != null) {
       const v = +m.hideMinutes;
-      s.hideMinutes = v > 0 && v < 1 ? 10 / 60 : Math.min(90, Math.max(1, Math.round(v) || 30)); // under 1 min = 10 s test mode
+      s.hideMinutes = v > 0 && v < 1 ? 10 / 60 : Math.min(90, Math.max(1, Math.round(v) || 20)); // under 1 min = 10 s test mode
     }
     if (m.zoneRadius != null) s.zoneRadius = Math.min(1000, Math.max(50, Math.round(+m.zoneRadius) || 200));
     if (m.includeNaujamiestis != null) s.includeNaujamiestis = !!m.includeNaujamiestis;
@@ -317,6 +346,7 @@ const H = {
     if (!seekers(room).length) fail('Pick at least one seeker.');
     resetRound(room);
     buildDeck(room);
+    hiders(room).forEach((p) => { p.hidCount = (p.hidCount || 0) + 1; });
     room.phase = 'hiding';
     room.hideEndsAt = Date.now() + room.settings.hideMinutes * MIN;
     const hm = room.settings.hideMinutes;
@@ -557,6 +587,34 @@ const H = {
     removeFromHand(room, [inst.uid]);
     if (discards.length) removeFromHand(room, discards);
     checkHandLimit(room);
+  },
+
+  draw(ws, m, room, me) {
+    if (me.role !== 'seeker') fail('Only seekers can draw.');
+    if (!['hiding', 'seeking'].includes(room.phase)) fail('The drawing board opens when the round starts.');
+    if (room.drawings.length >= MAX_STROKES) fail('The board is full. Undo or clear some drawings first.');
+    const tool = m.tool === 'shade' ? 'shade' : 'pen';
+    const color = PALETTE.includes(m.color) ? m.color : PALETTE[0];
+    if (!Array.isArray(m.pts) || m.pts.length < (tool === 'shade' ? 3 : 2) || m.pts.length > MAX_STROKE_POINTS) fail('That drawing is too short or too long.');
+    const pts = m.pts.map((p) => [Math.round(+p[0] * 1e5) / 1e5, Math.round(+p[1] * 1e5) / 1e5]);
+    if (pts.some(([a, b]) => !Number.isFinite(a) || !Number.isFinite(b) || Math.abs(a - 54.68) > 0.2 || Math.abs(b - 25.28) > 0.3)) fail('Drawings must be in Vilnius.');
+    room.drawings.push({ id: rid(4), by: me.id, byName: me.name, tool, color, pts, t: Date.now() });
+    room.drawRev++;
+  },
+
+  undoDraw(ws, m, room, me) {
+    if (me.role !== 'seeker') fail('Only seekers can draw.');
+    for (let i = room.drawings.length - 1; i >= 0; i--) {
+      if (room.drawings[i].by === me.id) { room.drawings.splice(i, 1); room.drawRev++; return; }
+    }
+    fail('You have nothing to undo.');
+  },
+
+  clearDrawings(ws, m, room, me) {
+    if (me.role !== 'seeker') fail('Only seekers can draw.');
+    if (!room.drawings.length) return;
+    room.drawings = []; room.drawRev++;
+    event(room, `${me.name} cleared the drawing board.`, 'seeker');
   },
 
   clearCurse(ws, m, room, me) {

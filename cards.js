@@ -23,7 +23,7 @@
   const QUESTIONS = {
     matching: {
       label: 'Matching', short: 'Same as ours?', color: '#6FA8DC',
-      answer: 'yesno', minutes: 5, reward: { draw: 3, keep: 1 },
+      answer: 'yesno', minutes: 2, reward: { draw: 3, keep: 1 },
       blurb: 'Is your nearest thing the same as ours?',
       items: [
         { id: 'ma-church',   text: 'Is your nearest church the same as our nearest church?' },
@@ -42,7 +42,7 @@
     },
     measuring: {
       label: 'Measuring', short: 'Closer or further?', color: '#93C47D',
-      answer: 'closer', minutes: 5, reward: { draw: 3, keep: 1 },
+      answer: 'closer', minutes: 2, reward: { draw: 3, keep: 1 },
       blurb: 'Compared to us, are you closer to or further from something?',
       items: [
         { id: 'me-tower',      text: 'Compared to us, are you closer to or further from Gediminas Tower?', landmark: 'tower' },
@@ -62,7 +62,7 @@
     },
     radar: {
       label: 'Radar', short: 'Within X metres?', color: '#F6B26B',
-      answer: 'yesno', minutes: 5, reward: { draw: 2, keep: 1 },
+      answer: 'yesno', minutes: 2, reward: { draw: 2, keep: 1 },
       blurb: 'Are you within a set distance of us?',
       items: [
         { id: 'ra-50', meters: 50, text: 'Are you within 50 m of us?' },
@@ -83,7 +83,7 @@
     },
     thermometer: {
       label: 'Thermometer', short: 'Hotter or colder?', color: '#E06666',
-      answer: 'hotter', minutes: 5, reward: { draw: 2, keep: 1 },
+      answer: 'hotter', minutes: 2, reward: { draw: 2, keep: 1 },
       blurb: 'Walk a set distance, then ask if you got closer.',
       items: [
         { id: 'th-50', meters: 50, text: 'We walked 50 m. Are we hotter or colder?' },
@@ -99,7 +99,7 @@
     },
     photo: {
       label: 'Photo', short: 'Send a picture', color: '#C27BA0',
-      answer: 'photo', minutes: 10, reward: { draw: 1, keep: 1 },
+      answer: 'photo', minutes: 5, reward: { draw: 1, keep: 1 },
       blurb: 'Send us a photo of something near you.',
       items: [
         { id: 'ph-tallest', text: 'Send a photo of the tallest building you can see.' },
@@ -116,7 +116,7 @@
     },
     tentacles: {
       label: 'Tentacles', short: 'Which one?', color: '#8E7CC3',
-      answer: 'text', minutes: 5, reward: { draw: 4, keep: 2 },
+      answer: 'text', minutes: 3, reward: { draw: 4, keep: 2 },
       blurb: 'Of all the places of a kind near us, which one are you closest to?',
       items: [
         { id: 'te-church',   text: 'Of all churches within 500 m of us, which one are you closest to?' },
@@ -183,6 +183,10 @@
     'Before asking another question, the seekers climb stairs or a slope and send a photo of the view from above street level.', { block: true, discard: 1 });
   curse('bird', 'Curse of the pigeon',
     'Before asking another question, the seekers send a photo of a bird.', { block: true });
+  curse('pub', 'Curse of the pub crawl',
+    'Before asking another question, the seekers go into a bar or pub and order one drink each (soft drinks count). Send a photo of the glasses.', { block: true, discard: 1 });
+  curse('cheers', 'Curse of cheers to the hider',
+    'Before asking another question, all seekers raise a drink and record a short video toast to the hider, then send it in your group chat.', { block: true });
   curse('coin', 'Curse of the coin',
     'The app flips a coin. Tails means the seekers\' next question is answered with silence (you still draw for it).', { coin: true, discard: 1 });
 
@@ -196,14 +200,14 @@
     'One player (or a small team) hides, everyone else seeks. Everyone walks. No transport, no bikes, no scooters.',
     'The hider gets the hiding time to walk anywhere inside the play area and lock a hiding zone. The zone is a circle around where the hider stands when they lock it.',
     'When hiding time ends, seekers may leave the start. The clock runs until the hider is found.',
-    'Seekers ask one question at a time. Each question can be asked only once per round. The hider has 5 minutes to answer (10 for photos) and draws cards as a reward.',
+    'Seekers ask one question at a time. Each question can be asked only once per round. The hider has 2 minutes to answer (3 for Tentacles, 5 for photos) and draws cards as a reward.',
     'Hider cards are time bonuses (kept until the end), power ups and curses. Curses slow the seekers down.',
     'Once any seeker walks into the hiding zone, the app tells everyone. From then on the hider may not move.',
     'The hider is found when a seeker sees and names them. Press Found. Longest total time wins.',
     'Stay on public streets and open courtyards. No entering homes, paid venues or closed areas. Watch the traffic, it is dark.',
   ];
 
-  const api = { VERSION: 6, LANDMARKS, QUESTIONS, DECK, CARD_BY_ID, QUESTION_BY_ID, RULES };
+  const api = { VERSION: 9, LANDMARKS, QUESTIONS, DECK, CARD_BY_ID, QUESTION_BY_ID, RULES };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.CARDS = api;
 })(typeof window !== 'undefined' ? window : globalThis);
