@@ -1,6 +1,6 @@
 /* Night in the Old Town: slate-blue sky, plaster walls, sodium lamps, the Neris. */
 :root {
-  --build: 5; /* must match BUILD in app.js */
+  --build: 6; /* must match BUILD in app.js */
   --night: #16213A;
   --night-2: #1F2C4B;
   --night-3: #2A3A60;
@@ -19,10 +19,11 @@
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
-html, body { height: 100%; margin: 0; }
+html { overscroll-behavior-y: none; }
+body { margin: 0; min-height: 100%; }
 body {
   background: var(--night); color: var(--plaster);
-  font: 16px/1.45 var(--body); overflow: hidden;
+  font: 16px/1.45 var(--body); overflow-x: hidden; overscroll-behavior-y: none;
   -webkit-tap-highlight-color: transparent;
 }
 body[data-role="hider"] { --role: var(--neris); }
@@ -88,10 +89,11 @@ textarea { min-height: 70px; resize: vertical; }
 #code { text-transform: uppercase; letter-spacing: .3em; font-family: var(--display); font-weight: 700; text-align: center; }
 .fineprint { font-size: 13px; color: var(--muted); margin: 0; }
 body:not([data-screen="home"]) #home { display: none; }
+body[data-screen="home"] { overflow: hidden; height: 100%; }
 
 /* ---------- top bar ---------- */
 #topbar {
-  position: fixed; z-index: 20; top: 0; left: 0; right: 0;
+  position: fixed; z-index: 30; top: 0; left: 0; right: 0;
   padding: calc(8px + var(--safe-top)) 10px 8px;
   display: flex; align-items: center; gap: 8px;
   background: linear-gradient(var(--night) 60%, rgba(22,33,58,0));
@@ -110,7 +112,7 @@ body[data-paused="1"] #timer { opacity: .5; }
 
 /* ---------- banners ---------- */
 #banners {
-  position: fixed; z-index: 15; top: calc(66px + var(--safe-top)); left: 10px; right: 58px;
+  position: fixed; z-index: 25; top: calc(66px + var(--safe-top)); left: 10px; right: 58px;
   display: grid; gap: 6px; pointer-events: none;
 }
 .banner {
@@ -122,25 +124,31 @@ body[data-paused="1"] #timer { opacity: .5; }
 .banner.info { border-color: var(--neris); }
 
 /* ---------- bottom sheet ---------- */
+/* The panel is part of the page and the PAGE scrolls, not a box inside the panel.
+   Nested scroll boxes misbehave on some phone browsers; plain page scrolling works everywhere. */
+#spacer { height: 42vh; height: 42dvh; pointer-events: none; }
 #sheet {
-  position: fixed; z-index: 20; left: 0; right: 0; bottom: 0;
+  position: relative; z-index: 20;
+  min-height: 58vh; min-height: 58dvh;
   background: var(--night); border-top: 1.5px solid var(--night-3);
   border-radius: var(--radius-l) var(--radius-l) 0 0;
-  padding-bottom: var(--safe-bottom);
-  max-height: 62vh; max-height: 70dvh; display: flex; flex-direction: column; overflow: hidden;
+  padding-bottom: calc(40px + var(--safe-bottom));
   box-shadow: 0 -10px 30px rgba(0,0,0,.35);
 }
-#sheet.collapsed #sheet-body { display: none; }
-#sheet-handle { appearance: none; border: 0; background: none; padding: 8px 0 2px; cursor: pointer; }
+#sheet-handle { appearance: none; border: 0; background: none; padding: 8px 0 2px; cursor: pointer; display: block; width: 100%; }
 #sheet-handle span { display: block; margin: 0 auto; width: 44px; height: 5px; border-radius: 3px; background: var(--night-3); }
-#tabs { display: flex; gap: 4px; padding: 4px 10px 8px; overflow-x: auto; }
+body.scrolled #banners { display: none; }
+#tabs {
+  display: flex; gap: 4px; padding: 6px 10px 8px; overflow-x: auto;
+  position: sticky; top: calc(58px + var(--safe-top)); z-index: 3; background: var(--night);
+}
 #tabs button {
   appearance: none; border: 0; background: transparent; padding: 8px 12px; border-radius: 999px;
   font-weight: 700; color: var(--muted); cursor: pointer; white-space: nowrap; position: relative;
 }
 #tabs button[aria-selected="true"] { background: var(--night-2); color: var(--plaster); }
 #tabs .dot { position: absolute; top: 6px; right: 4px; width: 8px; height: 8px; border-radius: 50%; background: var(--curse); }
-#sheet-body { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; padding: 4px 14px 24px; display: block; }
+#sheet-body { padding: 4px 14px 24px; }
 #sheet-body > * + * { margin-top: 14px; }
 #sheet-body > .cat + .cat { margin-top: 8px; }
 #sheet-body h3 { font-size: 20px; }
@@ -170,6 +178,7 @@ body[data-paused="1"] #timer { opacity: .5; }
 
 /* questions */
 .cat {
+  scroll-margin-top: calc(120px + var(--safe-top));
   border-radius: var(--radius-s); background: var(--night-2); overflow: hidden;
   border-left: 6px solid var(--cat);
 }
@@ -243,15 +252,18 @@ body[data-paused="1"] #timer { opacity: .5; }
 .results td.num { font-variant-numeric: tabular-nums; text-align: right; }
 .bigtime { font-family: var(--display); font-weight: 800; font-size: 46px; color: var(--neris); line-height: 1; }
 
-/* menus & dialogs */
-dialog {
-  border: 0; padding: 0; background: transparent; color: var(--plaster);
-  width: min(520px, calc(100% - 20px)); max-height: calc(100% - 40px);
+/* menus and popups are full-page overlays in the normal page flow, so they scroll with the page too */
+.overlay {
+  position: absolute; top: 0; left: 0; right: 0; min-height: 100vh; z-index: 100;
+  background: rgba(6,10,22,.82);
+  padding: calc(14px + var(--safe-top)) 10px calc(40px + var(--safe-bottom));
 }
-dialog::backdrop { background: rgba(6,10,22,.65); }
+#modal.overlay { z-index: 110; }
+body.overlay-open #spacer, body.overlay-open #sheet, body.overlay-open #banners { display: none; }
+body.modal-open #menu { display: none; }
 .menu-inner {
   background: var(--night); border: 1.5px solid var(--night-3); border-radius: var(--radius-l);
-  padding: 16px; display: grid; gap: 14px; max-height: calc(100vh - 60px); overflow-y: auto;
+  padding: 16px; display: grid; gap: 14px; width: min(520px, 100%); margin: 0 auto;
 }
 .menu-head { display: flex; align-items: center; justify-content: space-between; }
 .menu-head h2 { font-size: 24px; }
@@ -261,7 +273,7 @@ dialog::backdrop { background: rgba(6,10,22,.65); }
 
 /* toasts */
 #toasts {
-  position: fixed; z-index: 50; left: 50%; transform: translateX(-50%);
+  position: fixed; z-index: 200; left: 50%; transform: translateX(-50%);
   top: calc(70px + var(--safe-top)); width: min(440px, calc(100% - 20px));
   display: grid; gap: 6px; pointer-events: none;
 }
@@ -275,7 +287,7 @@ dialog::backdrop { background: rgba(6,10,22,.65); }
 @media (prefers-reduced-motion: reduce) { .toast { animation: none; } .btn { transition: none; } }
 
 #conn {
-  position: fixed; z-index: 60; bottom: calc(10px + var(--safe-bottom)); left: 50%; transform: translateX(-50%);
+  position: fixed; z-index: 210; bottom: calc(10px + var(--safe-bottom)); left: 50%; transform: translateX(-50%);
   background: var(--curse); color: #fff; padding: 6px 12px; border-radius: 999px; font-size: 13px; font-weight: 700;
 }
 

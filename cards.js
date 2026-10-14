@@ -203,7 +203,7 @@
     'Stay on public streets and open courtyards. No entering homes, paid venues or closed areas. Watch the traffic, it is dark.',
   ];
 
-  const api = { VERSION: 5, LANDMARKS, QUESTIONS, DECK, CARD_BY_ID, QUESTION_BY_ID, RULES };
+  const api = { VERSION: 6, LANDMARKS, QUESTIONS, DECK, CARD_BY_ID, QUESTION_BY_ID, RULES };
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
   else root.CARDS = api;
 })(typeof window !== 'undefined' ? window : globalThis);

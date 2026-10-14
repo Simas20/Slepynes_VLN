@@ -4,7 +4,7 @@
   const C = window.CARDS;
   const Z = window.ZONES;
   const MIN = 60000;
-  const BUILD = 5;
+  const BUILD = 6;
   // Detect a half-finished upload: every file carries the same version number.
   function staleFiles(serverBuild) {
     const css = getComputedStyle(document.documentElement).getPropertyValue('--build').trim();
@@ -151,7 +151,7 @@
         joined = false; resumePending = false;
         const s = store.get(); delete s.code; delete s.pid; delete s.token; store.set(s);
         S = null; document.body.dataset.screen = 'home';
-        $('#topbar').hidden = $('#sheet').hidden = $('#banners').hidden = true;
+        $('#topbar').hidden = $('#sheet').hidden = $('#banners').hidden = $('#spacer').hidden = true;
         $('#conn').hidden = true;
       }
       toast(m.message, 'err');
@@ -241,26 +241,50 @@
     }
   }
 
+  // Full-page overlays (menu and popups). They live in the normal page flow so the page itself scrolls.
+  let savedScroll = 0;
+  const anyOverlay = () => !!document.querySelector('.overlay:not([hidden])');
+  function openOverlay(el) {
+    if (!el.hidden) return;
+    if (!anyOverlay()) savedScroll = window.scrollY;
+    el.hidden = false;
+    document.body.classList.add('overlay-open');
+    document.body.classList.toggle('modal-open', !$('#modal').hidden);
+    window.scrollTo(0, 0);
+    const f = el.querySelector('button, input, select, textarea'); if (f) f.focus({ preventScroll: true });
+  }
+  function closeOverlay(el) {
+    if (el.hidden) return;
+    el.hidden = true;
+    document.body.classList.toggle('modal-open', !$('#modal').hidden);
+    if (!anyOverlay()) { document.body.classList.remove('overlay-open'); window.scrollTo(0, savedScroll); }
+  }
+  const isOpen = (el) => !el.hidden;
+  document.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape') return;
+    if (isOpen($('#modal'))) closeOverlay($('#modal')); else if (isOpen($('#menu'))) closeOverlay($('#menu'));
+  });
+
   function openModal(build) {
     const dlg = $('#modal'); const body = $('#modal-body');
     body.replaceChildren();
-    const close = () => dlg.close();
+    const close = () => closeOverlay(dlg);
     build(body, close);
-    if (!dlg.open) dlg.showModal();
+    openOverlay(dlg);
   }
   function confirmBox(title, text, okLabel, onOk, danger) {
     openModal((body, close) => body.append(
       h('h2', {}, title), text ? h('p', { class: 'muted' }, text) : '',
       h('div', { class: 'row' },
         h('button', { class: 'btn ghost', onclick: close }, 'Cancel'),
-        h('button', { class: 'btn ' + (danger ? 'danger' : 'primary'), onclick: () => { close(); if ($('#menu').open) $('#menu').close(); onOk(); } }, okLabel)),
+        h('button', { class: 'btn ' + (danger ? 'danger' : 'primary'), onclick: () => { close(); closeOverlay($('#menu')); onOk(); } }, okLabel)),
     ));
   }
   function showPhoto(src) {
     openModal((body, close) => body.append(h('img', { src, class: 'zoom-img', alt: 'Answer photo' }), h('button', { class: 'btn wide', onclick: close }, 'Close')));
   }
-  $('#modal').addEventListener('click', (e) => { if (e.target === $('#modal')) $('#modal').close(); });
-  $('#menu').addEventListener('click', (e) => { if (e.target === $('#menu') || e.target.closest('[data-close]')) $('#menu').close(); });
+  $('#modal').addEventListener('click', (e) => { if (e.target === $('#modal')) closeOverlay($('#modal')); });
+  $('#menu').addEventListener('click', (e) => { if (e.target === $('#menu') || e.target.closest('[data-close]')) closeOverlay($('#menu')); });
 
   // ---------- render ----------
   function render() {
@@ -268,11 +292,11 @@
     document.body.dataset.screen = 'game';
     document.body.dataset.role = me ? me.role : 'seeker';
     document.body.dataset.paused = S.paused ? '1' : '0';
-    $('#topbar').hidden = false; $('#sheet').hidden = false;
+    $('#topbar').hidden = false; $('#sheet').hidden = false; $('#spacer').hidden = false;
     $('#role-chip').textContent = me && me.role === 'hider' ? 'Hider' : 'Seeker';
     drawZones(); drawNotes(); drawPlayers(); drawMe();
     renderBanners(); renderSheet(); handleEvents(); tick();
-    if ($('#menu').open) renderMenu();
+    if (isOpen($('#menu'))) renderMenu();
   }
   let menuKey = '';
 
@@ -328,8 +352,19 @@
 
   // ---------- sheet ----------
   const sheet = $('#sheet');
-  function openSheet() { sheet.classList.remove('collapsed'); }
-  $('#sheet-handle').addEventListener('click', () => sheet.classList.toggle('collapsed'));
+  const TOPBAR = 64;
+  const sheetTop = () => sheet.getBoundingClientRect().top + window.scrollY;
+  // Bring the panel's top (tabs) just under the top bar, unless it is already there.
+  function openSheet() {
+    const target = Math.max(0, sheetTop() - TOPBAR);
+    if (window.scrollY < target - 4) window.scrollTo({ top: target, behavior: 'smooth' });
+  }
+  // Handle: toggle between "map view" (page at top) and "panel view"
+  $('#sheet-handle').addEventListener('click', () => {
+    if (window.scrollY > 10) window.scrollTo({ top: 0, behavior: 'smooth' }); else openSheet();
+  });
+  const onScroll = () => document.body.classList.toggle('scrolled', window.scrollY > 40);
+  window.addEventListener('scroll', onScroll, { passive: true });
 
   function tabsFor() {
     if (S.phase === 'lobby') return [];
@@ -363,17 +398,19 @@
     const nav = $('#tabs');
     nav.replaceChildren(...tabs.map(([id, label]) => h('button', {
       role: 'tab', 'aria-selected': String(id === tab),
-      onclick: () => { tab = id; openSheet(); renderSheet(true); },
+      onclick: () => {
+        tab = id; renderSheet(true);
+        const target = Math.max(0, sheetTop() - TOPBAR);
+        if (window.scrollY > target) window.scrollTo(0, target); // start new tab at its top
+      },
     }, label, tabDot(id) ? h('span', { class: 'dot' }) : null)));
     nav.hidden = !tabs.length;
     const body = $('#sheet-body');
-    const scroll = body.scrollTop;
     let content;
     if (S.phase === 'lobby') content = viewLobby();
     else content = ({ ask: viewAsk, log: viewLog, curses: viewCurses, tools: viewTools, question: viewQuestion,
       hand: viewHand, zone: viewZone, results: viewResults })[tab]();
     body.replaceChildren(...[].concat(content).flat(Infinity).filter(Boolean));
-    body.scrollTop = scroll;
     tick();
   }
 
@@ -415,7 +452,7 @@
         ? h('button', { class: 'btn primary wide', disabled: !(hasHider && hasSeeker), onclick: () => send({ type: 'start' }) },
           hasHider && hasSeeker ? `Start round ${S.round}` : 'Pick at least one hider and one seeker')
         : h('p', { class: 'muted' }, 'Waiting for the host to start the round.'),
-      h('button', { class: 'btn ghost wide', onclick: () => { renderMenu(true); $('#menu').showModal(); } }, 'Read the rules'),
+      h('button', { class: 'btn ghost wide', onclick: () => { renderMenu(true); openOverlay($('#menu')); } }, 'Read the rules'),
     ];
   }
   function shareLink() {
@@ -461,7 +498,6 @@
     const wasOpen = openCats.has(cat);
     openCats.clear();
     if (!wasOpen) openCats.add(cat);
-    openSheet();
     renderSheet(true);
     if (!wasOpen) requestAnimationFrame(() => {
       const el = document.querySelector(`[data-cat="${cat}"]`);
@@ -774,8 +810,8 @@
         h('ul', { class: 'players' }, S.players.map((p) => h('li', { class: p.connected ? '' : 'off' },
           h('span', { class: 'name' }, p.name, p.id === S.hostId ? ' (host)' : ''), h('span', { class: 'small muted' }, p.role === 'hider' ? 'Hider' : 'Seeker', p.connected ? '' : ', offline'))))),
       host && running ? h('div', { class: 'section' }, h('h3', {}, 'Host controls'),
-        S.paused ? h('button', { class: 'btn primary wide', onclick: () => { $('#menu').close(); send({ type: 'resume' }); } }, 'Resume game')
-          : h('button', { class: 'btn wide', onclick: () => { $('#menu').close(); send({ type: 'pause' }); } }, 'Pause game'),
+        S.paused ? h('button', { class: 'btn primary wide', onclick: () => { closeOverlay($('#menu')); send({ type: 'resume' }); } }, 'Resume game')
+          : h('button', { class: 'btn wide', onclick: () => { closeOverlay($('#menu')); send({ type: 'pause' }); } }, 'Pause game'),
         S.phase === 'hiding' ? h('button', { class: 'btn wide', onclick: () => confirmBox('End hiding time now?', 'Seekers can start immediately.', 'End hiding', () => send({ type: 'endHiding' })) }, 'End hiding time now') : null,
         h('button', { class: 'btn danger wide', onclick: () => confirmBox('Abort this round?', 'Nothing is recorded. Everyone goes back to the lobby.', 'Abort round', () => send({ type: 'abort' }), true) }, 'Abort round')) : null,
       !host && hostP && !hostP.connected ? h('button', { class: 'btn wide', onclick: () => send({ type: 'claimHost' }) }, 'Become host (host is offline)') : null,
@@ -786,7 +822,7 @@
       }, true) }, 'Leave game'),
     ].filter(Boolean));
   }
-  $('#btn-menu').addEventListener('click', () => { renderMenu(true); $('#menu').showModal(); });
+  $('#btn-menu').addEventListener('click', () => { renderMenu(true); openOverlay($('#menu')); });
 
   // ---------- map ----------
   let map = null;
@@ -826,7 +862,7 @@
     if (!map) return;
     const pts = activeAreas().flatMap((a) => a.coords);
     const sh = $('#sheet');
-    const bottom = sh.hidden ? 40 : Math.min(sh.offsetHeight, window.innerHeight * 0.55) + 10;
+    const bottom = sh.hidden ? 40 : Math.max(40, Math.min(window.innerHeight * 0.6, window.innerHeight - sh.getBoundingClientRect().top) + 10);
     map.fitBounds(L.latLngBounds(pts), { paddingTopLeft: [10, 80], paddingBottomRight: [10, bottom] });
   }
   function drawZones(force) {
